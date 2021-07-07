@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: client-uds
+  labels:
+    k8s-app: client-filedownload
+spec:
+  selector:
+    matchLabels:
+      name: client-uds
+  template:
+    metadata:
+      labels:
+        name: client-uds
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: client-uds
+        image: docker.io/rishabh0202/fuse-uds:v2
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: uds
+          mountPath: /var/run/
+        - name: cache
+          mountPath: /mnt/local-cache/
+        command: ["/app/client"]
+        args: ["-socket-file", "fuse-client.sock", "-temp-dir", "/mnt/local-cache/client_tempdir/", "-threshold-requests", "9"]
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: uds
+        hostPath:
+          path: /var/run/
+          type: Directory
+      - name: cache
+        hostPath:
+          path: /mnt/local-cache/
+          type: Directory
+

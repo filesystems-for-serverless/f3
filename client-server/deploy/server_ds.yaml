@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: server-fuse
+  labels:
+    app: server-fuse
+spec:
+  selector:
+    matchLabels:
+      name: server-fuse
+  template:
+    metadata:
+      labels:
+        name: server-fuse
+    spec:
+      hostNetwork: true
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: server-uds
+        image: docker.io/rishabh0202/fuse-uds:v2
+        ports:
+        - containerPort: 9999
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: cache
+          mountPath: /mnt/local-cache/
+        command: ["/app/server"]
+        args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/server_tempdir/"]
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: cache
+        hostPath:
+          path: /mnt/local-cache/
+          type: Directory

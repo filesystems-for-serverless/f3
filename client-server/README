@@ -1,0 +1,28 @@
+========================GO===========================
+FIRST TIME RUN
+>>>go mod init main
+>>>go mod tidy
+
+COMPILE
+>>>go build <filename>.go
+
+RUN
+>>>sudo ./<filename>
+
+
+CLIENT FLAGS:
+socket-file "fuse-client.sock"
+temp-dir "./tempdir"
+
+SERVER FLAGS:
+listen-address "0.0.0.0"
+listen-port "9999"
+temp-dir "./tempdir"
+
+SOCKETSTUB FLAGS:
+socket-file "fuse-client.sock"
+send-address "127.0.0.1"
+send-port "9999"
+file-name "abc.pdf"
+
+>>>sudo ./client -socket-file "fuse-client.sock" -temp-dir "./tempdir"
