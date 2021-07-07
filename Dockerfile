@@ -15,23 +15,17 @@
 ARG ARCH=amd64
 
 FROM ubuntu AS builder
-COPY libfuse/example /libfuse/example
-COPY libfuse/build/lib/libfuse3.a /libfuse/libfuse3.a
-COPY libfuse/include /libfuse/include
-COPY libfuse/faas /libfuse/faas
+COPY fuse/libfuse/include /libfuse/include
+COPY fuse/cxxopts.hpp fuse/f3.cc fuse/uds_client.cc fuse/libfuse/build/lib/libfuse3.a /libfuse/
 RUN apt update && apt install -y build-essential
-#RUN g++ /libfuse/example/passthrough_hp.cc /libfuse/libfuse3.a -o /libfuse/fusetest \
-#	-I/libfuse/include -Wall -static -lrt -ldl -pthread \
-#	-Wl,--whole-archive -lpthread -Wl,--no-whole-archive
-#RUN gcc -Wall /libfuse/faas/f3.c /libfuse/faas/uds_client.cc /libfuse/libfuse3.a -I/libfuse/faas/ -I/libfuse/include -o /libfuse/fusetest -pthread -ldl
-RUN g++ -Wall /libfuse/faas/f3.cc /libfuse/faas/uds_client.cc /libfuse/libfuse3.a -I/libfuse/faas/ -I/libfuse/include -o /libfuse/fusetest -pthread -ldl
+RUN g++ -Wall /libfuse/faas/f3.cc /libfuse/faas/uds_client.cc /libfuse/libfuse3.a -I/libfuse/faas/ -I/libfuse/include -o /libfuse/f3-fuse-driver -pthread -ldl
 
 #FROM k8s.gcr.io/build-image/debian-base-${ARCH}:v2.1.3
 FROM ubuntu
 
 # Copy f3plugin from build _output directory
-COPY bin/f3plugin /f3plugin
-COPY --from=builder /libfuse/fusetest /fusetest
+COPY csi/bin/f3plugin /f3plugin
+COPY --from=builder /libfuse/f3-fuse-driver /f3-fuse-driver
 
 RUN apt update && apt install ca-certificates mount -y || true
 

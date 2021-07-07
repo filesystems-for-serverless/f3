@@ -108,9 +108,8 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		}
 	}
 
-	klog.Infof("Running ", "/fusetest" + " " + cephMount + " " + targetPath)
-	//cmd := exec.Command("/fusetest", cephMount, targetPath)
-	cmd := exec.Command("/fusetest", "--nosplice", "--debug", "--nocache", "--address", ns.Driver.nodeID+":9999", "--idroot", ns.Driver.tempdir, "--socket-path", ns.Driver.socketAddress, cephMount, targetPath)
+	klog.Infof("Running ", "/f3-fuse-driver" + " " + cephMount + " " + targetPath)
+	cmd := exec.Command("/f3-fuse-driver", "--nosplice", "--debug", "--nocache", "--address", ns.Driver.nodeID+":9999", "--idroot", ns.Driver.tempdir, "--socket-path", ns.Driver.socketAddress, cephMount, targetPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
