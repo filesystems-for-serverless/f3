@@ -1,0 +1,8 @@
+Build libfuse static library:
+
+mkdir libfuse/build; cd libfuse/build
+meson ..
+meson configure -D default_library=static
+ninja
+
+Then build f3-fuse-driver with `make`.
