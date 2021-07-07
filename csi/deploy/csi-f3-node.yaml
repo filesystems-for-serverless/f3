@@ -1,0 +1,159 @@
+---
+# This YAML file contains driver-registrar & csi driver nodeplugin API objects
+# that are necessary to run CSI nodeplugin for f3
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-f3-node
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: csi-f3-node
+  template:
+    metadata:
+      labels:
+        app: csi-f3-node
+    spec:
+      hostNetwork: true  # original f3 connection would be broken without hostNetwork setting
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: liveness-probe
+          image: k8s.gcr.io/sig-storage/livenessprobe:v2.1.0
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - --health-port=29653
+            - --v=2
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: node-driver-registrar
+          image: k8s.gcr.io/sig-storage/csi-node-driver-registrar:v2.0.1
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "rm -rf /registration/csi-f3plugin /registration/csi-f3plugin-reg.sock"]
+          args:
+            - --v=2
+            - --csi-address=/csi/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-f3plugin/csi.sock
+          env:
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: f3
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          #image: mcr.microsoft.com/k8s/csi/f3-csi:latest
+          image: kubes1:5000/f3/f3-csi:0.0.5
+          imagePullPolicy: Always
+          args:
+            - "-v=5"
+            - "--nodeid=$(NODE_ID)"
+            - "--endpoint=$(CSI_ENDPOINT)"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+          ports:
+            - containerPort: 29653
+              name: healthz
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: pods-mount-dir
+              mountPath: /var/lib/kubelet/pods
+              mountPropagation: "Bidirectional"
+            - name: f3
+              mountPath: /f3/
+            - name: mnt-dir
+              mountPath: /id/
+        - name: client-uds
+          #image: docker.io/rishabh0202/fuse-uds:v1
+          image: kubes1:5000/f3/transfer-client-server
+          command: ["/app/client"]
+          args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/"]
+          resources:
+            limits:
+              memory: 200Mi
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: mnt-dir
+              mountPath: /mnt/local-cache/
+            - name: f3
+              mountPath: /f3/
+        - name: server-uds
+          #image: docker.io/rishabh0202/fuse-uds:v1
+          image: kubes1:5000/f3/transfer-client-server
+          command: ["/app/server"]
+          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/"]
+          ports:
+            - containerPort: 9999
+          resources:
+            limits:
+              memory: 200Mi
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: mnt-dir
+              mountPath: /mnt/local-cache/
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: mnt-dir
+        hostPath:
+          path: /mnt/local-cache/
+          type: Directory
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi-f3plugin
+            type: DirectoryOrCreate
+        - name: pods-mount-dir
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: f3
+          emptyDir: {}
+        - name: mnt-dir
+          hostPath:
+            path: /mnt/local-cache
+            type: Directory
