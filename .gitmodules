@@ -4,3 +4,7 @@
 [submodule "fuse/libfuse"]
 	path = fuse/libfuse
 	url = https://github.com/libfuse/libfuse.git
+[submodule "openwhisk"]
+	path = openwhisk
+	url = /srv/git/openwhisk
+	branch = f3
