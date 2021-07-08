@@ -647,15 +647,23 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
     if (res == -1)
         goto out;
 
-    res = mkdirat(inode_p.id_fd, name, mode);
-    saverr = errno;
-    if (res == -1)
-        goto out;
+    if (S_ISDIR(mode)) {
+        res = mkdirat(inode_p.id_fd, name, mode);
+        saverr = errno;
+        if (res == -1)
+            goto out;
 
-    if (f3_is_new_id(parent, name)) {
-        auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
-        f3_mark_as_id(fd);
-        close(fd);
+        if (f3_is_new_id(parent, name)) {
+            auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
+            f3_mark_as_id(fd);
+            close(fd);
+        }
+
+    } else if (S_ISLNK(mode)) {
+        res = symlinkat(link, inode_p.id_fd, name);
+        saverr = errno;
+        if (res == -1)
+            goto out;
     }
 
     fuse_entry_param e;
@@ -701,8 +709,15 @@ static void sfs_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t parent,
     e.entry_timeout = fs.timeout;
 
     char procname[64];
-    sprintf(procname, "/proc/self/fd/%i", INODE(inode));
+    sprintf(procname, "/proc/self/fd/%i", inode.fd);
     auto res = linkat(AT_FDCWD, procname, inode_p.fd, name, AT_SYMLINK_FOLLOW);
+    if (res == -1) {
+        fuse_reply_err(req, errno);
+        return;
+    }
+
+    sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
+    res = linkat(AT_FDCWD, procname, inode_p.id_fd, name, AT_SYMLINK_FOLLOW);
     if (res == -1) {
         fuse_reply_err(req, errno);
         return;
@@ -728,6 +743,9 @@ static void sfs_rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
     Inode& inode_p = get_inode(parent);
     lock_guard<mutex> g {inode_p.m};
     auto res = unlinkat(inode_p.fd, name, AT_REMOVEDIR);
+    if (res == -1)
+        fuse_reply_err(req, errno);
+    res = unlinkat(inode_p.id_fd, name, AT_REMOVEDIR);
     fuse_reply_err(req, res == -1 ? errno : 0);
 }
 
@@ -743,6 +761,9 @@ static void sfs_rename(fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
     auto res = renameat(inode_p.fd, name, inode_np.fd, newname);
+    if (res == -1)
+        fuse_reply_err(req, errno);
+    res = renameat(inode_p.id_fd, name, inode_np.id_fd, newname);
     fuse_reply_err(req, res == -1 ? errno : 0);
 }
 
@@ -776,7 +797,13 @@ static void sfs_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
         }
     }
     auto res = unlinkat(inode_p.fd, name, 0);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    if (res == -1)
+        fuse_reply_err(req, errno);
+    res = unlinkat(inode_p.id_fd, name, 0);
+    if (res == -1)
+        fuse_reply_err(req, errno);
+
+    fuse_reply_err(req, 0);
 }
 
 
