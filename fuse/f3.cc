@@ -365,7 +365,7 @@ static void sfs_init(void *userdata, fuse_conn_info *conn) {
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
     Inode& inode = get_inode(ino);
-    F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
+    //F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
 
     struct stat attr;
     auto res = fstatat(INODE(inode), "", &attr,
@@ -374,7 +374,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         fuse_reply_err(req, errno);
         return;
     }
-    F3_LOG("%s: size: %lu", __func__, attr.st_size);
+    //F3_LOG("%s: size: %lu", __func__, attr.st_size);
     fuse_reply_attr(req, &attr, fs.timeout);
 }
 
