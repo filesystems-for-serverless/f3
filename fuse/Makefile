@@ -13,7 +13,7 @@ endif
 all: f3-fuse-driver
 
 f3-fuse-driver: $(SOURCES)
-	$(CC) $(SOURCES) libfuse/build/lib/libfuse3.a -Wall -Ilibfuse/include -o f3-fuse-driver -pthread -ldl
+	$(CC) $(SOURCES) libfuse/build/lib/libfuse3.a -Wall -Ilibfuse/include -o f3-fuse-driver -pthread -ldl -DHAVE_SETXATTR
 
 clean:
 	rm f3-fuse-driver

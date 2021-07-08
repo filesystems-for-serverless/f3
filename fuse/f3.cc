@@ -658,6 +658,9 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
             auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
             f3_mark_as_id(fd);
             close(fd);
+            fd = openat(inode_p.id_fd, name, O_PATH | O_NOFOLLOW);
+            f3_mark_as_id(fd);
+            close(fd);
         }
 
     } else if (S_ISLNK(mode)) {
@@ -1092,6 +1095,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 
     if (f3_is_new_id(parent, name)) {
         f3_mark_as_id(fd);
+        f3_mark_as_id(id_fd);
         fi->fh = id_fd;
     }
 
@@ -1300,6 +1304,8 @@ static void sfs_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
     Inode& inode = get_inode(ino);
     ssize_t ret;
     int saverr;
+
+    F3_LOG("%s: %s", __func__, name);
 
     char procname[64];
     sprintf(procname, "/proc/self/fd/%i", INODE(inode));
