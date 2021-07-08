@@ -64,6 +64,7 @@
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/xattr.h>
+#include <sys/sendfile.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -206,17 +207,17 @@ static int f3_get_rel_path(int fd, char *full_path) {
     return 0;
 }
 
-static int f3_get_full_fd(int fd) {
+static int f3_get_full_fd(int fd, mode_t mode) {
     char buf[64];
     sprintf(buf, "/proc/self/fd/%i", fd);
-    return open(buf, O_RDONLY);
+    return open(buf, mode);
 }
 
-static int f3_mark_as_id(int fd) {
+static int f3_mark_as_id(int fd, int root_dir_len) {
     int res = 0;
     auto saveerr = ENOMEM;
 
-    auto newfd = f3_get_full_fd(fd);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
     }
@@ -243,8 +244,8 @@ static int f3_mark_as_id(int fd) {
         goto out;
     }
     //cerr << "F3: full path: " << full_path << " rel path: " << full_path + fs.source.length() << endl;
-    F3_LOG("full path: %s rel path: %s", full_path, full_path + fs.source.length());
-    res = fsetxattr(fd, "user.f3.filepath", full_path + fs.source.length(), strlen(full_path + fs.source.length()), 0);
+    F3_LOG("full path: %s rel path: %s", full_path, full_path + root_dir_len);
+    res = fsetxattr(fd, "user.f3.filepath", full_path + root_dir_len, strlen(full_path + root_dir_len), 0);
     if (res == -1) {
         saveerr = errno;
         goto out;
@@ -263,7 +264,7 @@ static int f3_is_id(int fd) {
 
     // fd might have been opened in a mode that doesn't allow using
     // fgetxattr (e.g. O_PATH)
-    auto newfd = f3_get_full_fd(fd);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
     }
@@ -273,8 +274,9 @@ static int f3_is_id(int fd) {
         if (errno == ENODATA) {
             ret = 0;
             errno = 0;
+        } else {
+            perror("uh6");
         }
-        perror("uh6");
         ret = 0;
         goto out;
     }
@@ -296,7 +298,7 @@ static bool f3_is_new_id(fuse_ino_t parent, const char *name) {
 static int f3_get_servers(int fd, char *servers, size_t size) {
     int ret = 0;
 
-    auto newfd = f3_get_full_fd(fd);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
     }
@@ -315,7 +317,7 @@ static int f3_get_servers(int fd, char *servers, size_t size) {
 static int f3_get_filepath(int fd, char *filepath, size_t size) {
     int ret = 0;
 
-    auto newfd = f3_get_full_fd(fd);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
     }
@@ -330,6 +332,35 @@ static int f3_get_filepath(int fd, char *filepath, size_t size) {
     return ret;
 }
 
+static int f3_make_id_fs(fuse_ino_t ino) {
+    Inode& inode = get_inode(ino);
+    auto fs_fd = f3_get_full_fd(inode.fd, O_RDWR);
+    auto id_fd = f3_get_full_fd(inode.id_fd, O_RDWR);
+    int saverr = 0;
+    int ret = 0;
+    off_t offset = 0;
+
+    while ((ret = sendfile(fs_fd, id_fd, &offset, 4096)) > 0);
+    if (ret == -1) {
+        saverr = errno;
+        F3_LOG("!!! %d", saverr);
+        goto out;
+    }
+
+    if (ftruncate(id_fd, 0) < 0) {
+        saverr = errno;
+        F3_LOG("!!! %d", saverr);
+    }
+
+    inode.is_id = false;
+
+out:
+    close(fs_fd);
+    close(id_fd);
+
+    return saverr;
+}
+
 
 static int get_fs_fd(fuse_ino_t ino) {
     int fd = get_inode(ino).fd;
@@ -340,7 +371,6 @@ static int get_fs_id_fd(fuse_ino_t ino) {
     int fd = get_inode(ino).id_fd;
     return fd;
 }
-
 
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
     (void)userdata;
@@ -656,10 +686,10 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
 
         if (f3_is_new_id(parent, name)) {
             auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
-            f3_mark_as_id(fd);
+            f3_mark_as_id(fd, fs.source.length());
             close(fd);
             fd = openat(inode_p.id_fd, name, O_PATH | O_NOFOLLOW);
-            f3_mark_as_id(fd);
+            f3_mark_as_id(fd, fs.idroot.length());
             close(fd);
         }
 
@@ -1094,8 +1124,8 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
     if (f3_is_new_id(parent, name)) {
-        f3_mark_as_id(fd);
-        f3_mark_as_id(id_fd);
+        f3_mark_as_id(fd, fs.source.length());
+        f3_mark_as_id(id_fd, fs.idroot.length());
         fi->fh = id_fd;
     }
 
@@ -1307,6 +1337,7 @@ static void sfs_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
 
     F3_LOG("%s: %s", __func__, name);
 
+    // Doesn't matter which inode (ID vs FS) since the xattrs should be the same
     char procname[64];
     sprintf(procname, "/proc/self/fd/%i", INODE(inode));
 
@@ -1350,6 +1381,7 @@ static void sfs_listxattr(fuse_req_t req, fuse_ino_t ino, size_t size) {
     ssize_t ret;
     int saverr;
 
+    // Doesn't matter which inode (ID vs FS) since the xattrs should be the same
     char procname[64];
     sprintf(procname, "/proc/self/fd/%i", INODE(inode));
 
@@ -1390,15 +1422,16 @@ static void sfs_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
                          const char *value, size_t size, int flags) {
     Inode& inode = get_inode(ino);
     ssize_t ret;
-    int saverr;
 
     char procname[64];
-    sprintf(procname, "/proc/self/fd/%i", INODE(inode));
-
+    sprintf(procname, "/proc/self/fd/%i", inode.fd);
     ret = setxattr(procname, name, value, size, flags);
-    saverr = ret == -1 ? errno : 0;
+    if (ret == -1)
+        F3_REPLY_ERR(req, errno);
 
-    F3_REPLY_ERR(req, saverr);
+    sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
+    ret = setxattr(procname, name, value, size, flags);
+    F3_REPLY_ERR(req, ret == -1 ? errno : 0);
 }
 
 
@@ -1406,13 +1439,26 @@ static void sfs_removexattr(fuse_req_t req, fuse_ino_t ino, const char *name) {
     char procname[64];
     Inode& inode = get_inode(ino);
     ssize_t ret;
-    int saverr;
 
-    sprintf(procname, "/proc/self/fd/%i", INODE(inode));
+    F3_LOG("%s: %s", __func__, name);
+
+    sprintf(procname, "/proc/self/fd/%i", inode.fd);
     ret = removexattr(procname, name);
-    saverr = ret == -1 ? errno : 0;
+    if (ret == -1)
+        F3_REPLY_ERR(req, errno);
 
-    F3_REPLY_ERR(req, saverr);
+    sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
+    ret = removexattr(procname, name);
+    if (ret == -1)
+        F3_REPLY_ERR(req, errno);
+
+    ret = 0;
+    if (strncmp(name, "user.f3.id", sizeof("user.f3.id")) == 0) {
+        F3_LOG("Converting ID to regular file");
+        ret = f3_make_id_fs(ino);
+    }
+
+    F3_REPLY_ERR(req, (int)ret);
 }
 #endif
 
