@@ -83,7 +83,7 @@
 using namespace std;
 
 #define F3_LOG(fmt, ...) do { fprintf(stderr, "F3: line %d: " fmt "\n", __LINE__, ##__VA_ARGS__); }while(0)
-#define F3_REPLY_ERR(req, err) do { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); }while(0)
+#define F3_REPLY_ERR(req, err) do { if (err == 0) { fuse_reply_err(req, err); } else { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); } } while(0)
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
 static std::string uds_path;
