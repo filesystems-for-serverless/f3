@@ -133,8 +133,8 @@ struct Inode {
     int generation {0};
     uint64_t nopen {0};
     uint64_t nlookup {0};
-	bool is_id {false};
-	bool needs_download{false};
+    bool is_id {false};
+    bool needs_download{false};
     std::mutex m;
 
     // Delete copy constructor and assignments. We could implement
@@ -159,12 +159,12 @@ struct Fs {
     double timeout;
     bool debug;
     std::string source;
-	std::string idroot;
+    std::string idroot;
     size_t blocksize;
     dev_t src_dev;
     bool nosplice;
     bool nocache;
-	std::string address;
+    std::string address;
 };
 static Fs fs{};
 
@@ -206,127 +206,127 @@ static int f3_get_rel_path(int fd, char *full_path) {
 }
 
 static int f3_get_full_fd(int fd) {
-	char buf[64];
-	sprintf(buf, "/proc/self/fd/%i", fd);
-	return open(buf, O_RDONLY);
+    char buf[64];
+    sprintf(buf, "/proc/self/fd/%i", fd);
+    return open(buf, O_RDONLY);
 }
 
 static int f3_mark_as_id(int fd) {
-	int res = 0;
-	auto saveerr = ENOMEM;
+    int res = 0;
+    auto saveerr = ENOMEM;
 
-	auto newfd = f3_get_full_fd(fd);
-	if (newfd == -1) {
+    auto newfd = f3_get_full_fd(fd);
+    if (newfd == -1) {
         return 0;
-	}
+    }
 
-	const char *istempfile = "true";
-	res = fsetxattr(newfd, "user.f3.id", istempfile, sizeof("true"), 0);
-	if (res == -1) {
-		saveerr = errno;
-		goto out;
-	}
+    const char *istempfile = "true";
+    res = fsetxattr(newfd, "user.f3.id", istempfile, sizeof("true"), 0);
+    if (res == -1) {
+        saveerr = errno;
+        goto out;
+    }
 
-	res = fsetxattr(newfd, "user.f3.servers", fs.address.c_str(), strlen(fs.address.c_str()), 0);
-	if (res == -1) {
-		saveerr = errno;
-		goto out;
-	}
+    res = fsetxattr(newfd, "user.f3.servers", fs.address.c_str(), strlen(fs.address.c_str()), 0);
+    if (res == -1) {
+        saveerr = errno;
+        goto out;
+    }
 
-	// Want the file path relative to the Ceph mountpoint
+    // Want the file path relative to the Ceph mountpoint
     char full_path[PATH_MAX];
-	memset(full_path, 0, PATH_MAX);
+    memset(full_path, 0, PATH_MAX);
     res = f3_get_rel_path(newfd, full_path);
     if (res < 0) {
         saveerr = errno;
         goto out;
     }
     //cerr << "F3: full path: " << full_path << " rel path: " << full_path + fs.source.length() << endl;
-	F3_LOG("full path: %s rel path: %s", full_path, full_path + fs.source.length());
-	res = fsetxattr(fd, "user.f3.filepath", full_path + fs.source.length(), strlen(full_path + fs.source.length()), 0);
-	if (res == -1) {
-		saveerr = errno;
-		goto out;
-	}
-
-out:
-	close(newfd);
-	errno = saveerr;
-	return res;
-}
-
-static int f3_is_id(int fd) {
-	char attr[10];
-	int ret = 1;
-    auto saveerr = ENOMEM;
-
-    // fd might have been opened in a mode that doesn't allow using
-    // fgetxattr (e.g. O_PATH)
-	auto newfd = f3_get_full_fd(fd);
-	if (newfd == -1) {
-        return 0;
-	}
-
-	ret = fgetxattr(newfd, "user.f3.id", attr, sizeof(attr));
-	if (ret < 0) {
-		if (errno == ENODATA) {
-			ret = 0;
-            errno = 0;
-        }
-		perror("uh6");
-		ret = 0;
-		goto out;
-	}
-
-	// Don't actually care what the attr is, just that it exists
-	//printf("Got attr %s\n", attr);
+    F3_LOG("full path: %s rel path: %s", full_path, full_path + fs.source.length());
+    res = fsetxattr(fd, "user.f3.filepath", full_path + fs.source.length(), strlen(full_path + fs.source.length()), 0);
+    if (res == -1) {
+        saveerr = errno;
+        goto out;
+    }
 
 out:
     close(newfd);
     errno = saveerr;
-	return ret;
+    return res;
+}
+
+static int f3_is_id(int fd) {
+    char attr[10];
+    int ret = 1;
+    auto saveerr = ENOMEM;
+
+    // fd might have been opened in a mode that doesn't allow using
+    // fgetxattr (e.g. O_PATH)
+    auto newfd = f3_get_full_fd(fd);
+    if (newfd == -1) {
+        return 0;
+    }
+
+    ret = fgetxattr(newfd, "user.f3.id", attr, sizeof(attr));
+    if (ret < 0) {
+        if (errno == ENODATA) {
+            ret = 0;
+            errno = 0;
+        }
+        perror("uh6");
+        ret = 0;
+        goto out;
+    }
+
+    // Don't actually care what the attr is, just that it exists
+    //printf("Got attr %s\n", attr);
+
+out:
+    close(newfd);
+    errno = saveerr;
+    return ret;
 }
 
 static bool f3_is_new_id(fuse_ino_t parent, const char *name) {
-	Inode& inode_p = get_inode(parent);
-	return f3_is_id(inode_p.fd) > 0 || f3_is_id_ext(name);
+    Inode& inode_p = get_inode(parent);
+    return f3_is_id(inode_p.fd) > 0 || f3_is_id_ext(name);
 }
 
 static int f3_get_servers(int fd, char *servers, size_t size) {
-	int ret = 0;
+    int ret = 0;
 
-	auto newfd = f3_get_full_fd(fd);
-	if (newfd == -1) {
+    auto newfd = f3_get_full_fd(fd);
+    if (newfd == -1) {
         return 0;
-	}
+    }
 
-	ret = fgetxattr(newfd, "user.f3.servers", servers, size);
-	if (ret < 0) {
-		perror("uh5");
-	}
+    ret = fgetxattr(newfd, "user.f3.servers", servers, size);
+    if (ret < 0) {
+        perror("uh5");
+    }
 
-	close(newfd);
+    close(newfd);
 
-	return ret;
+    return ret;
 }
 
 
 static int f3_get_filepath(int fd, char *filepath, size_t size) {
-	int ret = 0;
+    int ret = 0;
 
-	auto newfd = f3_get_full_fd(fd);
-	if (newfd == -1) {
+    auto newfd = f3_get_full_fd(fd);
+    if (newfd == -1) {
         return 0;
-	}
+    }
 
-	ret = fgetxattr(newfd, "user.f3.filepath", filepath, size);
-	if (ret < 0) {
-		perror("uh50");
-	}
+    ret = fgetxattr(newfd, "user.f3.filepath", filepath, size);
+    if (ret < 0) {
+        perror("uh50");
+    }
 
-	close(newfd);
+    close(newfd);
 
-	return ret;
+    return ret;
 }
 
 
@@ -365,16 +365,16 @@ static void sfs_init(void *userdata, fuse_conn_info *conn) {
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
     Inode& inode = get_inode(ino);
-	F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
+    F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
 
     struct stat attr;
-	auto res = fstatat(INODE(inode), "", &attr,
-				   AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+    auto res = fstatat(INODE(inode), "", &attr,
+                   AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
         fuse_reply_err(req, errno);
         return;
     }
-	F3_LOG("%s: size: %lu", __func__, attr.st_size);
+    F3_LOG("%s: size: %lu", __func__, attr.st_size);
     fuse_reply_attr(req, &attr, fs.timeout);
 }
 
@@ -509,7 +509,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         if (fs.debug)
             cerr << "DEBUG: lookup(): inode " << e->attr.st_ino
                  << " recycled; generation=" << inode.generation << endl;
-	/* fallthrough to new inode but keep existing inode.nlookup */
+    /* fallthrough to new inode but keep existing inode.nlookup */
     }
 
     if (inode.fd > 0) { // found existing inode
@@ -517,7 +517,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         if (fs.debug)
             cerr << "DEBUG: lookup(): inode " << e->attr.st_ino
                  << " (userspace) already known; fd = " << inode.fd
-				 << " " << (long unsigned int)inode_p << endl;
+                 << " " << (long unsigned int)inode_p << endl;
         lock_guard<mutex> g {inode.m};
         inode.nlookup++;
         close(newfd);
@@ -532,84 +532,84 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         inode.nlookup++;
         inode.fd = newfd;
 
-		if (f3_is_new_id(parent, name)) {
-			inode.is_id = true;
-		}
+        if (f3_is_new_id(parent, name)) {
+            inode.is_id = true;
+        }
 
-		auto id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
-		if (id_fd == -1) {
-			auto saverr = errno;
-			if (saverr == ENOENT) {
-				F3_LOG("%s: ENOENT, creating...", __func__);
-				if (S_ISDIR(e->attr.st_mode)) {
-					F3_LOG("...directory");
-    				auto res = mkdirat(get_fs_id_fd(parent), name, e->attr.st_mode);
-					if (res == -1) {
-						saverr = errno;
-						F3_LOG("!!! %d", saverr);
-					}
-					id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
-					if (id_fd == -1) {
-						saverr = errno;
-						F3_LOG("!!! %d", saverr);
-					}
-				} else {
-					F3_LOG("...file");
-    				id_fd = openat(get_fs_id_fd(parent), name,O_CREAT & ~O_NOFOLLOW,
-							e->attr.st_mode);
-					if (id_fd == -1) {
-						saverr = errno;
-						F3_LOG("!!! %d", saverr);
-					}
-					close(id_fd);
-					id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
-					if (id_fd == -1) {
-						saverr = errno;
-						F3_LOG("!!! %d", saverr);
-					}
-					if (inode.is_id)
-						inode.needs_download = true;
-				}
-				// XXX Don't need to mark as ID, since the FS file is what's marked and
-				// we're creating the ID file/directory here
-				// If it's an ID file, need to download it
-				// XXX Check access modes to see if it's being read?  Where do we do that?
-				// Otherwise (non-ID file/directory or ID directory), just create
-				// the place holder
-			}
-			//F3_LOG("!!! %d %lu", get_fs_id_fd(parent), (long unsigned int)parent);
-			//return saverr;
-		}
-		inode.id_fd = id_fd;
+        auto id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
+        if (id_fd == -1) {
+            auto saverr = errno;
+            if (saverr == ENOENT) {
+                F3_LOG("%s: ENOENT, creating...", __func__);
+                if (S_ISDIR(e->attr.st_mode)) {
+                    F3_LOG("...directory");
+                    auto res = mkdirat(get_fs_id_fd(parent), name, e->attr.st_mode);
+                    if (res == -1) {
+                        saverr = errno;
+                        F3_LOG("!!! %d", saverr);
+                    }
+                    id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
+                    if (id_fd == -1) {
+                        saverr = errno;
+                        F3_LOG("!!! %d", saverr);
+                    }
+                } else {
+                    F3_LOG("...file");
+                    id_fd = openat(get_fs_id_fd(parent), name,O_CREAT & ~O_NOFOLLOW,
+                            e->attr.st_mode);
+                    if (id_fd == -1) {
+                        saverr = errno;
+                        F3_LOG("!!! %d", saverr);
+                    }
+                    close(id_fd);
+                    id_fd = openat(get_fs_id_fd(parent), name, O_PATH | O_NOFOLLOW);
+                    if (id_fd == -1) {
+                        saverr = errno;
+                        F3_LOG("!!! %d", saverr);
+                    }
+                    if (inode.is_id)
+                        inode.needs_download = true;
+                }
+                // XXX Don't need to mark as ID, since the FS file is what's marked and
+                // we're creating the ID file/directory here
+                // If it's an ID file, need to download it
+                // XXX Check access modes to see if it's being read?  Where do we do that?
+                // Otherwise (non-ID file/directory or ID directory), just create
+                // the place holder
+            }
+            //F3_LOG("!!! %d %lu", get_fs_id_fd(parent), (long unsigned int)parent);
+            //return saverr;
+        }
+        inode.id_fd = id_fd;
 
         fs_lock.unlock();
 
         if (fs.debug)
             cerr << "DEBUG: lookup(): created userspace inode " << e->attr.st_ino
                  << "; fd = " << inode.fd << " " << inode.id_fd 
-				 << " " << (long unsigned int)inode_p << endl;
+                 << " " << (long unsigned int)inode_p << endl;
     }
 
-	if (inode.is_id) {
-		F3_LOG("%s: replacing attr with ID attr", __func__);
-		auto res = fstatat(inode.id_fd, "", &e->attr, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
-		if (res == -1) {
-			auto saveerr = errno;
-			close(newfd);
-			if (fs.debug)
-				cerr << "DEBUG: lookup(): fstatat failed" << endl;
-			return saveerr;
-		}
+    if (inode.is_id) {
+        F3_LOG("%s: replacing attr with ID attr", __func__);
+        auto res = fstatat(inode.id_fd, "", &e->attr, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+        if (res == -1) {
+            auto saveerr = errno;
+            close(newfd);
+            if (fs.debug)
+                cerr << "DEBUG: lookup(): fstatat failed" << endl;
+            return saveerr;
+        }
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
-	}
+    }
 
     return 0;
 }
 
 
 static void sfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
-	F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
+    F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
     fuse_entry_param e {};
     auto err = do_lookup(parent, name, &e);
     if (err == ENOENT) {
@@ -622,7 +622,7 @@ static void sfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
         fuse_reply_err(req, err);
     } else {
-		F3_LOG("%s: returning with attr size %lu", __func__, e.attr.st_size);
+        F3_LOG("%s: returning with attr size %lu", __func__, e.attr.st_size);
         fuse_reply_entry(req, &e);
     }
 }
@@ -635,7 +635,7 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
     Inode& inode_p = get_inode(parent);
     auto saverr = ENOMEM;
 
-	F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
+    F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
 
     if (S_ISDIR(mode))
         res = mkdirat(inode_p.fd, name, mode);
@@ -650,13 +650,13 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
     res = mkdirat(inode_p.id_fd, name, mode);
     saverr = errno;
     if (res == -1)
-		goto out;
+        goto out;
 
-	if (f3_is_new_id(parent, name)) {
-		auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
-		f3_mark_as_id(fd);
-		close(fd);
-	}
+    if (f3_is_new_id(parent, name)) {
+        auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
+        f3_mark_as_id(fd);
+        close(fd);
+    }
 
     fuse_entry_param e;
     saverr = do_lookup(parent, name, &e);
@@ -753,27 +753,27 @@ static void sfs_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
     // to test reused inode numbers.
     // Skip this when inode has an open file and when writeback cache is enabled.
     if (!fs.timeout) {
-	    fuse_entry_param e;
-	    auto err = do_lookup(parent, name, &e);
-	    if (err) {
-		    fuse_reply_err(req, err);
-		    return;
-	    }
-	    if (e.attr.st_nlink == 1) {
-		    Inode& inode = get_inode(e.ino);
-		    lock_guard<mutex> g {inode.m};
-		    if (inode.fd > 0 && !inode.nopen) {
-			    if (fs.debug)
-				    cerr << "DEBUG: unlink: release inode " << e.attr.st_ino
-					    << "; fd=" << inode.fd << endl;
-			    lock_guard<mutex> g_fs {fs.mutex};
-			    close(inode.fd);
-				close(inode.id_fd);
-			    inode.fd = -ENOENT;
-				inode.id_fd = -ENOENT;
-			    inode.generation++;
-		    }
-	    }
+        fuse_entry_param e;
+        auto err = do_lookup(parent, name, &e);
+        if (err) {
+            fuse_reply_err(req, err);
+            return;
+        }
+        if (e.attr.st_nlink == 1) {
+            Inode& inode = get_inode(e.ino);
+            lock_guard<mutex> g {inode.m};
+            if (inode.fd > 0 && !inode.nopen) {
+                if (fs.debug)
+                    cerr << "DEBUG: unlink: release inode " << e.attr.st_ino
+                        << "; fd=" << inode.fd << endl;
+                lock_guard<mutex> g_fs {fs.mutex};
+                close(inode.fd);
+                close(inode.id_fd);
+                inode.fd = -ENOENT;
+                inode.id_fd = -ENOENT;
+                inode.generation++;
+            }
+        }
     }
     auto res = unlinkat(inode_p.fd, name, 0);
     fuse_reply_err(req, res == -1 ? errno : 0);
@@ -903,7 +903,7 @@ static bool is_dot_or_dotdot(const char *name) {
 static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
                     off_t offset, fuse_file_info *fi, int plus) {
 
-	F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
+    F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
     auto d = get_dir_handle(fi);
     Inode& inode = get_inode(ino);
     lock_guard<mutex> g {inode.m};
@@ -1028,7 +1028,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
                        mode_t mode, fuse_file_info *fi) {
     Inode& inode_p = get_inode(parent);
 
-	F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
+    F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
 
     auto fd = openat(inode_p.fd, name,
                      (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
@@ -1041,7 +1041,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
     fi->fh = fd;
-	/*
+    /*
     fi->fh = fd;
     fuse_entry_param e;
     auto err = do_lookup(parent, name, &e);
@@ -1049,7 +1049,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
         fuse_reply_err(req, err);
-	return;
+    return;
     }*/
 
     auto id_fd = openat(inode_p.id_fd, name,
@@ -1062,12 +1062,12 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         return;
     }
 
-	if (f3_is_new_id(parent, name)) {
-		f3_mark_as_id(fd);
-		fi->fh = id_fd;
-	}
+    if (f3_is_new_id(parent, name)) {
+        f3_mark_as_id(fd);
+        fi->fh = id_fd;
+    }
 
-	// XXX Here is where we need to choose which fd to return to user
+    // XXX Here is where we need to choose which fd to return to user
     //fi->fh = fd;
     fuse_entry_param e;
     auto err = do_lookup(parent, name, &e);
@@ -1075,7 +1075,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
         fuse_reply_err(req, err);
-		return;
+        return;
     }
 
     Inode& inode = get_inode(e.ino);
@@ -1101,7 +1101,7 @@ static void sfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
 static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     Inode& inode = get_inode(ino);
 
-	F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
+    F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
 
     /* With writeback cache, kernel may send read requests even
        when userspace opened write-only */
@@ -1120,23 +1120,23 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         fi->flags &= ~O_APPEND;
 
     if (inode.needs_download) {
-		F3_LOG("Needs download");
+        F3_LOG("Needs download");
 
-		char rel_path[PATH_MAX];
-		f3_get_filepath(inode.fd, rel_path, PATH_MAX);
-		char servers[100];
-		f3_get_servers(inode.fd, servers, 100);
+        char rel_path[PATH_MAX];
+        f3_get_filepath(inode.fd, rel_path, PATH_MAX);
+        char servers[100];
+        f3_get_servers(inode.fd, servers, 100);
 
-		auto ret = download_file(uds_path.c_str(), rel_path, servers);
-		if (ret < 0) {
-			perror("Download?");
-		}
-		inode.needs_download = false;
-	}
+        auto ret = download_file(uds_path.c_str(), rel_path, servers);
+        if (ret < 0) {
+            perror("Download?");
+        }
+        inode.needs_download = false;
+    }
 
     /* Unfortunately we cannot use inode.fd, because this was opened
        with O_PATH (so it doesn't allow read/write access). */
-	F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
+    F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
     char buf[64];
     sprintf(buf, "/proc/self/fd/%i", INODE(inode));
     auto fd = open(buf, fi->flags & ~O_NOFOLLOW);
@@ -1198,8 +1198,8 @@ static void do_read(fuse_req_t req, size_t size, off_t off, fuse_file_info *fi) 
 static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
                      fuse_file_info *fi) {
     (void) ino;
-	Inode& inode = get_inode(ino);
-	F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d fd: %lu", __func__, inode.id_fd, inode.fd, inode.is_id, fi->fh);
+    Inode& inode = get_inode(ino);
+    F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d fd: %lu", __func__, inode.id_fd, inode.fd, inode.is_id, fi->fh);
     do_read(req, size, off, fi);
 }
 
@@ -1212,7 +1212,7 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
     out_buf.buf[0].fd = fi->fh;
     out_buf.buf[0].pos = off;
 
-	F3_LOG("%s: %lu", __func__, fi->fh);
+    F3_LOG("%s: %lu", __func__, fi->fh);
 
     auto res = fuse_buf_copy(&out_buf, in_buf, FUSE_BUF_COPY_FLAGS);
     if (res < 0)
@@ -1225,8 +1225,8 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
 static void sfs_write_buf(fuse_req_t req, fuse_ino_t ino, fuse_bufvec *in_buf,
                           off_t off, fuse_file_info *fi) {
     (void) ino;
-	Inode& inode = get_inode(ino);
-	F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
+    Inode& inode = get_inode(ino);
+    F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
     auto size {fuse_buf_size(in_buf)};
     do_write_buf(req, size, off, in_buf, fi);
 }
