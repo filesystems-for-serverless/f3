@@ -19,7 +19,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: client-uds
-        image: docker.io/rishabh0202/fuse-uds:v2
+        image: docker.io/rishabh0202/fuse-uds:v3
         resources:
           limits:
             memory: 200Mi

@@ -20,7 +20,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: server-uds
-        image: docker.io/rishabh0202/fuse-uds:v2
+        image: docker.io/rishabh0202/fuse-uds:v3
         ports:
         - containerPort: 9999
         resources:

@@ -7,6 +7,7 @@ ADD src/client .
 ADD src/server .
 
 RUN go mod init main
+RUN go mod tidy
 RUN go build client.go
 RUN go build server.go 
 

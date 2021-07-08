@@ -2,11 +2,10 @@ package main
 
 import (
 	"bufio"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"math"
 	"math/rand"
 	"net"
@@ -24,7 +23,7 @@ const (
 )
 
 type Return struct {
-	filesize  uint64
+	filesize  int64
 	isSuccess bool
 }
 
@@ -40,16 +39,16 @@ var (
 )
 
 func main() {
-
+	log.SetFormatter(&log.JSONFormatter{})
+	log.SetLevel(log.TraceLevel)
 	socket_file := flag.String("socket-file", "/f3/fuse-client.sock", "string")
 	tempDir := flag.String("temp-dir", "/mnt/local-cache/client_tempdir", "string")
 	thresholdRequests := flag.Int64("threshold-requests", 10, "int64")
 	flag.Parse()
 
 	thresholdSamples = *thresholdRequests
-	log.Println("socket_file:" + *socket_file)
-	log.Println("temp_dir:" + *tempDir)
-
+	log.WithFields(log.Fields{"thread": "client.main",}).Trace("socket_file:" + *socket_file)
+	log.WithFields(log.Fields{"thread": "client.main",}).Trace("temp_dir:" + *tempDir)
 	run_local_server(*socket_file, *tempDir)
 }
 
@@ -58,37 +57,38 @@ func main() {
 func run_local_server(socket_file string, tempDir string) {
 
 	socket_file = socket_file
-	log.Println("Creating socket file: " + socket_file)
+	log.WithFields(log.Fields{"thread": "client.main",}).Trace("Creating socket file: " + socket_file)
 	if err := os.RemoveAll(socket_file); err != nil {
-		log.Fatal(err)
+		log.WithFields(log.Fields{"thread": "client.main",}).Fatal("Error while creating the socket file: ",err)
+		os.Exit(1)
 	}
 
-	log.Println("Establishing connection using socket file: " + socket_file)
+	log.WithFields(log.Fields{"thread": "client.main",}).Trace("Establishing connection using socket file: " + socket_file)
 	l, err := net.Listen("unix", socket_file)
 	if err != nil {
-		log.Fatal("listen error: ", err)
+		log.WithFields(log.Fields{"thread": "client.main",}).Fatal("Listen error: ", err)
+		os.Exit(1)
 	}
 	defer l.Close()
 
 	set := make(map[string]bool)
 
 	for {
-		log.Println("Waiting for connection")
+		log.WithFields(log.Fields{"thread": "client.main",}).Trace("Waiting for connection.")
 		conn, err := l.Accept()
 		if err != nil {
-			log.Println("Error Connecting:", err.Error())
+			log.WithFields(log.Fields{"thread": "client.main",}).Error("Error accepting connection: ", err.Error())
 			continue
 		}
 
-		log.Println("Got connection from " + conn.RemoteAddr().String())
 		buffer, err := bufio.NewReader(conn).ReadBytes('\n')
 		if err != nil {
-			log.Println("Client left.")
+			log.WithFields(log.Fields{"thread": "client.main",}).Trace("Client left.")
 			conn.Close()
 			continue
 		}
 		message := string(buffer[:len(buffer)-1])
-		log.Println("Received message from the FUSE: " + message)
+		log.WithFields(log.Fields{"thread": "client.main",}).Trace("Received message from the FUSE: " + message)
 		connectionHandler(conn, tempDir, set, message)
 	}
 }
@@ -106,17 +106,16 @@ func connectionHandler(conn net.Conn, tempDir string, set map[string]bool, messa
 	var msg = "ACK"
 
 	if isExist, _ := checkFileLocally(string(path)); isExist {
-		log.Println(file + " already exist in the local cache")
+		log.WithFields(log.Fields{"thread": "client.main","fileName": file,}).Info(file + " already exist in the local cache")
 	} else if _, ok := set[file]; ok {
-		log.Println(file + " is already in-progress")
+		log.WithFields(log.Fields{"thread": "client.main","fileName": file,}).Info(file + " is already in-progress")
 	} else {
-		log.Println(file + " not being downloaded and does not exist in local-cache, connecting with server")
 		serverPool := make(map[string]bool)
 		for true {
 			server := getServer(servers, serverPool)
 			serverPool[server] = true
 
-			log.Println("filename: " + file + " server: " + server)
+			log.WithFields(log.Fields{"thread": "client.main","fileName": file,"serverAddress": server,}).Info("Downloading file: " + file + " from server: " + server)
 			start := time.Now()
 
 			set[file] = true
@@ -127,17 +126,15 @@ func connectionHandler(conn net.Conn, tempDir string, set map[string]bool, messa
 			delete(set, file)
 			if ack.isSuccess {
 				elapsed := time.Since(start)
-				go putServer(server, float64(ack.filesize)/float64(elapsed))
-				log.Println("File found in server " + server)
-				log.Printf("downloading took %s", elapsed)
+				elapsedSeconds := elapsed.Seconds()
+				go putServer(server, float64(ack.filesize)/float64(elapsedSeconds*1024*1024))
+				log.WithFields(log.Fields{"thread": "client.main","fileName": file,"serverAddress": server, "fileSize": ack.filesize, "downloadRate(mbps)": fmt.Sprintf("%.4f",float64(ack.filesize)/(elapsedSeconds*1024*1024))}).Info("Downloading took "+ fmt.Sprint(elapsed))
 			} else {
-				log.Println("File doesn't exist in server " + server)
 				if len(serverPool) != len(servers) {
-					log.Println("Retrying..")
+					log.WithFields(log.Fields{"thread": "client.main","fileName": file,}).Trace("Retrying.. on different server")
 					continue
 				}
-				log.Println("Server list exhausted.")
-				log.Println("Sending NACK to the client!!")
+				log.WithFields(log.Fields{"thread": "client.main","fileName": file,}).Info("Server list exhausted. File Not Found")
 				msg = "NACK"
 			}
 			break
@@ -150,43 +147,39 @@ func connectionHandler(conn net.Conn, tempDir string, set map[string]bool, messa
 //If the file exists, it firstly receives the file size and then the file itself
 func downloadFile(finished chan Return, file string, server string, tempDir string) {
 
-	log.Println("Downloading Request for " + file + " from " + server + " to " + tempDir)
 	conn, err := net.DialTimeout(connType, server, 6*time.Second)
 
 	if err != nil {
-		log.Println("Error connecting: ", err.Error())
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Error("Error connecting to server: ", err.Error())
 		finished <- Return{0, false}
 		return
 	}
 
-	log.Println("Sending file name to the server to check if it exists.")
 	fmt.Fprintf(conn, file+"\n")
 	received := make([]byte, 4)
 	conn.Read(received)
 	message := strings.Trim(string(received), ":")
 	if strings.Compare(message, "NACK") == 0 {
-		log.Println(file + " doesn't exist on server")
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Info(file + " doesn't exist on this server")
 		finished <- Return{0, false}
 		return
 	} else {
-		log.Println(file + " exist on the server. Receiving the file size")
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Trace(file + " exist on this server.")
 	}
 
 	fileSizeReceived := make([]byte, 20)
 	conn.Read(fileSizeReceived)
 	fileSize, _ := strconv.ParseInt(strings.Trim(string(fileSizeReceived), ":"), 10, 64)
 
-	log.Println("Creating file locally")
 	f, err := os.Create(path.Join(tempDir, file))
 	if err != nil {
-		log.Println("Error creating new file: ", err.Error())
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,"fileSize": fileSize,}).Error("Error creating new file: ", err.Error())
 		finished <- Return{0, false}
 		return
 	}
 	defer f.Close()
 
 	var receivedBytes int64
-	log.Println("Received file size from the server. Started receiving file chunks from server")
 	for {
 		if (fileSize - receivedBytes) <= BUFFERSIZE {
 			io.CopyN(f, conn, (fileSize - receivedBytes))
@@ -196,8 +189,8 @@ func downloadFile(finished chan Return, file string, server string, tempDir stri
 		io.CopyN(f, conn, BUFFERSIZE)
 		receivedBytes += BUFFERSIZE
 	}
-	log.Println("Downloaded " + file)
-	finished <- Return{binary.BigEndian.Uint64(fileSizeReceived), true}
+	log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server, "fileSize": fileSize,}).Trace("File "+file +" has been downloaded.")
+	finished <- Return{fileSize, true}
 	return
 }
 
@@ -212,11 +205,9 @@ func getServer(serverList []string, serverPool map[string]bool) string {
 		}
 		measure, found := getRouteTable(s)
 		if found == false {
-			log.Println("Server doesn't exist in the route table")
 			israndom = true
 			break
 		} else if measure.requests < thresholdSamples {
-			log.Println("Requests is less than " + fmt.Sprint(thresholdSamples))
 			israndom = true
 			break
 		}
@@ -231,7 +222,6 @@ func getServer(serverList []string, serverPool map[string]bool) string {
 		}
 	}
 	if israndom == true {
-		log.Println("Going for random server")
 		for {
 			server = serverList[rand.Intn(len(serverList))]
 			if _, ok := serverPool[server]; !ok {
@@ -246,12 +236,12 @@ func getServer(serverList []string, serverPool map[string]bool) string {
 func putServer(server string, downloadSpeed float64) {
 	measure, found := getRouteTable(server)
 	if !found {
-		log.Println("Inserting the record in the Route table first time. Download Speed: " + fmt.Sprint(downloadSpeed) + " Requests: " + fmt.Sprint(measure.requests+1))
+		log.WithFields(log.Fields{"thread": "client.putServer",}).Trace("Inserting the record in the Route table first time. Download Rate: " + fmt.Sprint(downloadSpeed) + " Requests: " + fmt.Sprint(measure.requests+1))
 		setRouteTable(server, Measures{downloadSpeed, 1})
 		return
 	}
 	newDwSpd := (measure.download_speed*float64(measure.requests) + downloadSpeed) / float64(measure.requests+1)
-	log.Println("Updating the record in the Route table. Running Download Avg.: " + fmt.Sprint(newDwSpd) + " Requests: " + fmt.Sprint(measure.requests+1))
+	log.WithFields(log.Fields{"thread": "client.putServer",}).Trace("Updating the record in the Route table. Running Download Avg.: " + fmt.Sprint(newDwSpd) + " Requests: " + fmt.Sprint(measure.requests+1))
 	new_measure := Measures{download_speed: newDwSpd, requests: measure.requests + 1}
 	setRouteTable(server, new_measure)
 }
@@ -294,4 +284,3 @@ func getUniqueServers(serverList []string) []string {
 	}
 	return newServerList
 }
-
