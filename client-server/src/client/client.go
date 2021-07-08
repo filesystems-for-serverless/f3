@@ -270,8 +270,8 @@ func setRouteTable(key string, value Measures) {
 }
 
 func checkFileLocally(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
+	s, err := os.Stat(path)
+	if err == nil && s.Size() > 0 {
 		return true, nil
 	}
 	if os.IsNotExist(err) {
