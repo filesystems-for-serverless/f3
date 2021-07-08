@@ -54,7 +54,7 @@ PLUGIN_BIN := ./bin/f3plugin
 PLUGIN_CMD := ./cmd/f3plugin
 SOURCES := pkg/f3/*.go $(PLUGIN_CMD)/main.go
 
-all: container
+all: f3
 
 .PHONY: local-build-push
 local-build-push: f3
