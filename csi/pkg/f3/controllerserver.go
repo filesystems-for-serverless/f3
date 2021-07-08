@@ -312,6 +312,7 @@ func (cs *ControllerServer) newF3Volume(name string, size int64, params map[stri
 		}
 	}
 
+	/*
 	// Validate required parameters
 	if server == "" {
 		return nil, fmt.Errorf("%v is a required parameter", paramServer)
@@ -322,7 +323,7 @@ func (cs *ControllerServer) newF3Volume(name string, size int64, params map[stri
 
 	if mountType == "" {
 		mountType = "f3"
-	}
+	}*/
 
 	vol := &f3Volume{
 		server:  server,
