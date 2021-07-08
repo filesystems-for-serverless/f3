@@ -83,6 +83,7 @@
 using namespace std;
 
 #define F3_LOG(fmt, ...) do { fprintf(stderr, "F3: line %d: " fmt "\n", __LINE__, ##__VA_ARGS__); }while(0)
+#define F3_REPLY_ERR(req, err) do { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); }while(0)
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
 static std::string uds_path;
@@ -371,7 +372,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     auto res = fstatat(INODE(inode), "", &attr,
                    AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
         return;
     }
     //F3_LOG("%s: size: %lu", __func__, attr.st_size);
@@ -451,7 +452,7 @@ static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
     return sfs_getattr(req, ino, fi);
 
 out_err:
-    fuse_reply_err(req, errno);
+    F3_REPLY_ERR(req, errno);
 }
 
 
@@ -620,7 +621,7 @@ static void sfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
     } else if (err) {
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
     } else {
         F3_LOG("%s: returning with attr size %lu", __func__, e.attr.st_size);
         fuse_reply_entry(req, &e);
@@ -677,7 +678,7 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
 out:
     if (saverr == ENFILE || saverr == EMFILE)
         cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-    fuse_reply_err(req, saverr);
+    F3_REPLY_ERR(req, saverr);
 }
 
 
@@ -712,20 +713,20 @@ static void sfs_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t parent,
     sprintf(procname, "/proc/self/fd/%i", inode.fd);
     auto res = linkat(AT_FDCWD, procname, inode_p.fd, name, AT_SYMLINK_FOLLOW);
     if (res == -1) {
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
         return;
     }
 
     sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
     res = linkat(AT_FDCWD, procname, inode_p.id_fd, name, AT_SYMLINK_FOLLOW);
     if (res == -1) {
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
         return;
     }
 
     res = fstatat(INODE(inode), "", &e.attr, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
         return;
     }
     e.ino = reinterpret_cast<fuse_ino_t>(&inode);
@@ -744,9 +745,9 @@ static void sfs_rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
     lock_guard<mutex> g {inode_p.m};
     auto res = unlinkat(inode_p.fd, name, AT_REMOVEDIR);
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
     res = unlinkat(inode_p.id_fd, name, AT_REMOVEDIR);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -756,15 +757,15 @@ static void sfs_rename(fuse_req_t req, fuse_ino_t parent, const char *name,
     Inode& inode_p = get_inode(parent);
     Inode& inode_np = get_inode(newparent);
     if (flags) {
-        fuse_reply_err(req, EINVAL);
+        F3_REPLY_ERR(req, EINVAL);
         return;
     }
 
     auto res = renameat(inode_p.fd, name, inode_np.fd, newname);
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
     res = renameat(inode_p.id_fd, name, inode_np.id_fd, newname);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -777,7 +778,7 @@ static void sfs_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
         fuse_entry_param e;
         auto err = do_lookup(parent, name, &e);
         if (err) {
-            fuse_reply_err(req, err);
+            F3_REPLY_ERR(req, err);
             return;
         }
         if (e.attr.st_nlink == 1) {
@@ -798,12 +799,12 @@ static void sfs_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
     }
     auto res = unlinkat(inode_p.fd, name, 0);
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
     res = unlinkat(inode_p.id_fd, name, 0);
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
 
-    fuse_reply_err(req, 0);
+    F3_REPLY_ERR(req, 0);
 }
 
 
@@ -849,9 +850,9 @@ static void sfs_readlink(fuse_req_t req, fuse_ino_t ino) {
     char buf[PATH_MAX + 1];
     auto res = readlinkat(INODE(inode), "", buf, sizeof(buf));
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
     else if (res == sizeof(buf))
-        fuse_reply_err(req, ENAMETOOLONG);
+        F3_REPLY_ERR(req, ENAMETOOLONG);
     else {
         buf[res] = '\0';
         fuse_reply_readlink(req, buf);
@@ -883,7 +884,7 @@ static void sfs_opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     Inode& inode = get_inode(ino);
     auto d = new (nothrow) DirHandle;
     if (d == nullptr) {
-        fuse_reply_err(req, ENOMEM);
+        F3_REPLY_ERR(req, ENOMEM);
         return;
     }
 
@@ -917,7 +918,7 @@ out_errno:
     delete d;
     if (error == ENFILE || error == EMFILE)
         cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-    fuse_reply_err(req, error);
+    F3_REPLY_ERR(req, error);
 }
 
 
@@ -944,7 +945,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 
     auto buf = new (nothrow) char[size];
     if (!buf) {
-        fuse_reply_err(req, ENOMEM);
+        F3_REPLY_ERR(req, ENOMEM);
         return;
     }
     p = buf;
@@ -1017,7 +1018,7 @@ error:
     if (err && rem == size) {
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
     } else {
         if (fs.debug)
             cerr << "DEBUG: readdir(): returning " << count
@@ -1063,7 +1064,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         auto err = errno;
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
         return;
     }
 
@@ -1075,7 +1076,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     if (err) {
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
     return;
     }*/
 
@@ -1085,7 +1086,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         auto err = errno;
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
         return;
     }
 
@@ -1101,7 +1102,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     if (err) {
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
         return;
     }
 
@@ -1121,7 +1122,7 @@ static void sfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
         res = fdatasync(fd);
     else
         res = fsync(fd);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -1171,7 +1172,7 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         auto err = errno;
         if (err == ENFILE || err == EMFILE)
             cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        fuse_reply_err(req, err);
+        F3_REPLY_ERR(req, err);
         return;
     }
 
@@ -1188,14 +1189,14 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     lock_guard<mutex> g {inode.m};
     inode.nopen--;
     close(fi->fh);
-    fuse_reply_err(req, 0);
+    F3_REPLY_ERR(req, 0);
 }
 
 
 static void sfs_flush(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void) ino;
     auto res = close(dup(fi->fh));
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -1207,7 +1208,7 @@ static void sfs_fsync(fuse_req_t req, fuse_ino_t ino, int datasync,
         res = fdatasync(fi->fh);
     else
         res = fsync(fi->fh);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -1243,7 +1244,7 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
 
     auto res = fuse_buf_copy(&out_buf, in_buf, FUSE_BUF_COPY_FLAGS);
     if (res < 0)
-        fuse_reply_err(req, -res);
+        F3_REPLY_ERR(req, (int)-res);
     else
         fuse_reply_write(req, (size_t)res);
 }
@@ -1264,7 +1265,7 @@ static void sfs_statfs(fuse_req_t req, fuse_ino_t ino) {
 
     auto res = fstatvfs(get_fs_fd(ino), &stbuf);
     if (res == -1)
-        fuse_reply_err(req, errno);
+        F3_REPLY_ERR(req, errno);
     else
         fuse_reply_statfs(req, &stbuf);
 }
@@ -1275,12 +1276,12 @@ static void sfs_fallocate(fuse_req_t req, fuse_ino_t ino, int mode,
                           off_t offset, off_t length, fuse_file_info *fi) {
     (void) ino;
     if (mode) {
-        fuse_reply_err(req, EOPNOTSUPP);
+        F3_REPLY_ERR(req, EOPNOTSUPP);
         return;
     }
 
     auto err = posix_fallocate(fi->fh, offset, length);
-    fuse_reply_err(req, err);
+    F3_REPLY_ERR(req, err);
 }
 #endif
 
@@ -1288,7 +1289,7 @@ static void sfs_flock(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi,
                       int op) {
     (void) ino;
     auto res = flock(fi->fh, op);
-    fuse_reply_err(req, res == -1 ? errno : 0);
+    F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
 
@@ -1332,7 +1333,7 @@ out_free:
 out_err:
     saverr = errno;
 out:
-    fuse_reply_err(req, saverr);
+    F3_REPLY_ERR(req, saverr);
     goto out_free;
 }
 
@@ -1374,7 +1375,7 @@ out_free:
 out_err:
     saverr = errno;
 out:
-    fuse_reply_err(req, saverr);
+    F3_REPLY_ERR(req, saverr);
     goto out_free;
 }
 
@@ -1391,7 +1392,7 @@ static void sfs_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
     ret = setxattr(procname, name, value, size, flags);
     saverr = ret == -1 ? errno : 0;
 
-    fuse_reply_err(req, saverr);
+    F3_REPLY_ERR(req, saverr);
 }
 
 
@@ -1405,7 +1406,7 @@ static void sfs_removexattr(fuse_req_t req, fuse_ino_t ino, const char *name) {
     ret = removexattr(procname, name);
     saverr = ret == -1 ? errno : 0;
 
-    fuse_reply_err(req, saverr);
+    F3_REPLY_ERR(req, saverr);
 }
 #endif
 
