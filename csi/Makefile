@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-CMDS=f3plugin
 DEPLOY_FOLDER = ./deploy
 CMDS=f3plugin
 #PKG = github.com/kubernetes-csi/csi-driver-f3
@@ -23,26 +22,39 @@ GOBIN ?= $(GOPATH)/bin
 DOCKER_CLI_EXPERIMENTAL = enabled
 export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL
 
-include release-tools/build.make
+REV=$(shell git describe --long --tags --match='v*' --dirty 2>/dev/null || git rev-list -n1 HEAD)
+IMPORTPATH_LDFLAGS = -X main.version=$(REV)
+EXT_LDFLAGS = -extldflags "-static"
+LDFLAGS =
+FULL_LDFLAGS = $(LDFLAGS) $(IMPORTPATH_LDFLAGS) $(EXT_LDFLAGS)
+GOFLAGS_VENDOR =
+
+#include release-tools/build.make
 
 GIT_COMMIT = $(shell git rev-parse HEAD)
 BUILD_DATE = $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 IMAGE_VERSION = v3.0.0
 #LDFLAGS = -X ${PKG}/pkg/f3.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/f3.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/f3.buildDate=${BUILD_DATE}
-EXT_LDFLAGS = -s -w -extldflags "-static"
+#EXT_LDFLAGS = -s -w -extldflags "-static"
+
 # Use a custom version for E2E tests if we are testing in CI
 ifdef CI
 ifndef PUBLISH
 override IMAGE_VERSION := e2e-$(GIT_COMMIT)
 endif
 endif
+
 IMAGENAME ?= f3plugin
 REGISTRY ?= kubes1:5000/f3
 IMAGE_TAG = $(REGISTRY)/$(IMAGENAME):$(IMAGE_VERSION)
 IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGENAME):latest
 LOCAL_USER ?= kubes1:5000/f3
 
-all: f3
+PLUGIN_BIN := ./bin/f3plugin
+PLUGIN_CMD := ./cmd/f3plugin
+SOURCES := pkg/f3/*.go $(PLUGIN_CMD)/main.go
+
+all: container
 
 .PHONY: local-build-push
 local-build-push: f3
@@ -56,6 +68,7 @@ local-k8s-install:
 	kubectl apply -f $(DEPLOY_FOLDER)/csi-f3-driverinfo.yaml
 	kubectl apply -f $(DEPLOY_FOLDER)/csi-f3-controller.yaml
 	kubectl apply -f $(DEPLOY_FOLDER)/csi-f3-node.yaml
+	kubectl apply -f $(DEPLOY_FOLDER)/f3-sc.yaml
 	echo "Successfully installed"
 
 .PHONY: local-k8s-uninstall
@@ -65,11 +78,13 @@ local-k8s-uninstall:
 	kubectl delete -f $(DEPLOY_FOLDER)/csi-f3-node.yaml --ignore-not-found
 	kubectl delete -f $(DEPLOY_FOLDER)/csi-f3-driverinfo.yaml --ignore-not-found
 	kubectl delete -f $(DEPLOY_FOLDER)/rbac-csi-f3-controller.yaml --ignore-not-found
-	echo "Uninstalled NFS driver"
+	kubectl delete -f $(DEPLOY_FOLDER)/f3-sc.yaml --ignore-not-found
+	echo "Uninstalled F3 driver"
 
 .PHONY: f3
-f3:
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags "${LDFLAGS} ${EXT_LDFLAGS}" -mod vendor -o bin/f3plugin ./cmd/f3plugin
+f3: $(PLUGIN_BIN)
+$(PLUGIN_BIN): $(SOURCES)
+	CGO_ENABLED=0 GOOS= GOARCH= go build $(GOFLAGS_VENDOR) -a -ldflags '$(FULL_LDFLAGS)' -o $(PLUGIN_BIN) $(PLUGIN_CMD)
 
 .PHONY: container
 container: f3

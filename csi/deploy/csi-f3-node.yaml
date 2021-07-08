@@ -64,7 +64,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           #image: mcr.microsoft.com/k8s/csi/f3-csi:latest
-          image: kubes1:5000/f3/f3-csi:0.0.5
+          image: kubes1:5000/f3/f3-csi:latest
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -101,7 +101,8 @@ spec:
               mountPath: /id/
         - name: client-uds
           #image: docker.io/rishabh0202/fuse-uds:v1
-          image: kubes1:5000/f3/transfer-client-server
+          image: kubes1:5000/f3/transfer-client-server:latest
+          imagePullPolicy: Always
           command: ["/app/client"]
           args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/"]
           resources:
@@ -117,7 +118,8 @@ spec:
               mountPath: /f3/
         - name: server-uds
           #image: docker.io/rishabh0202/fuse-uds:v1
-          image: kubes1:5000/f3/transfer-client-server
+          image: kubes1:5000/f3/transfer-client-server:latest
+          imagePullPolicy: Always
           command: ["/app/server"]
           args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/"]
           ports:
