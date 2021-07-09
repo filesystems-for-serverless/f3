@@ -23,11 +23,11 @@ func main(){
 	listen_port := flag.String("listen-port", "9999", "string")
 	temp_dir := flag.String("temp-dir", "./tempdir","string")
 	flag.Parse()
-	
+
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_add: "+ *listen_add)
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_port: "+ *listen_port)
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("temp_dir: "+ *temp_dir)
-	
+
 	run_remote_server(*listen_add, *listen_port, *temp_dir)
 }
 
@@ -39,7 +39,7 @@ func run_remote_server(listen_address string, listen_port string, temp_dir strin
 		os.Exit(1)
 	}
 	defer l.Close()
-	
+
 	for{
 		conn, err := l.Accept()
 		if err != nil{
@@ -52,7 +52,7 @@ func run_remote_server(listen_address string, listen_port string, temp_dir strin
 }
 
 //receives client's file request, checks if it is present and sends resp. ack to the client
-//if file is present, firstly sends the file size and then the file 
+//if file is present, firstly sends the file size and then the file
 func handleConnection(conn net.Conn, temp_dir string){
 	buffer, err := bufio.NewReader(conn).ReadBytes('\n')
 	clientAddress := conn.RemoteAddr().String()
