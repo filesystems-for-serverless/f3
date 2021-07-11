@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"bufio"
+	"encoding/binary"
 	"net"
 	"os"
 	"path"
 	"io"
-	"strconv"
 	log "github.com/sirupsen/logrus"
+	"fmt"
 )
 
 const(
@@ -67,27 +68,24 @@ func handleConnection(conn net.Conn, temp_dir string){
 	fname := path.Join(temp_dir, message)
 	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname,"clientAddress":clientAddress,}).Info("Got download request for file: " + fname)
 	file, err := os.Open(fname)
-	var msg string
 	if err != nil {
-		msg = "NACK"
+		binary.Write(conn, binary.LittleEndian, false)
 		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Info(err)
-		conn.Write([]byte(msg))
 		return
 	}
 	fileInfo, err := file.Stat()
 	if err != nil {
-		msg = "NACK"
+		binary.Write(conn, binary.LittleEndian, false)
 		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Info(err)
-		conn.Write([]byte(msg))
 		return
 	}
-	msg = fillString("ACK",4)
-	conn.Write([]byte(msg))
+	binary.Write(conn, binary.LittleEndian, true)
 	
-	fileSize := fillString(strconv.FormatInt(fileInfo.Size(), 10), 40)
-	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Info("Sending filesize: "+fileSize)
-	
-	conn.Write([]byte(fileSize))
+	err = binary.Write(conn, binary.LittleEndian, fileInfo.Size())
+	if err != nil{
+		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Error(err)
+	}
+	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Trace("Sending filesize: "+fmt.Sprint(fileInfo.Size()))
 	
 	sendBuffer := make([]byte, BUFFERSIZE)
 	for {
