@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"encoding/binary"
 	"io"
 	log "github.com/sirupsen/logrus"
 	"math"
@@ -11,7 +12,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,21 +156,27 @@ func downloadFile(finished chan Return, file string, server string, tempDir stri
 	}
 
 	fmt.Fprintf(conn, file+"\n")
-	received := make([]byte, 4)
-	conn.Read(received)
-	message := strings.Trim(string(received), ":")
-	if strings.Compare(message, "NACK") == 0 {
+	var ack bool
+	err = binary.Read(conn, binary.LittleEndian, &ack)
+	if err != nil{
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Error(err)
+	}
+	
+	if !ack {
 		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Info(file + " doesn't exist on this server")
 		finished <- Return{0, false}
 		return
 	} else {
 		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Trace(file + " exist on this server.")
 	}
-
-	fileSizeReceived := make([]byte, 20)
-	conn.Read(fileSizeReceived)
-	fileSize, _ := strconv.ParseInt(strings.Trim(string(fileSizeReceived), ":"), 10, 64)
-
+	
+	var fileSize int64
+	err = binary.Read(conn, binary.LittleEndian, &fileSize)
+	if err != nil{
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Error(err)
+	}
+	
+	log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Trace("Received file size: " + fmt.Sprint(fileSize))
 	f, err := os.Create(path.Join(tempDir, file))
 	if err != nil {
 		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,"fileSize": fileSize,}).Error("Error creating new file: ", err.Error())
