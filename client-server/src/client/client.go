@@ -15,6 +15,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"context"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -145,7 +150,9 @@ func connectionHandler(conn net.Conn, tempDir string, set map[string]bool, messa
 
 //It establishes TCP connection with the chosen server and checks if the file name exists on that server or not
 //If the file exists, it firstly receives the file size and then the file itself
-func downloadFile(finished chan Return, file string, server string, tempDir string) {
+func downloadFile(finished chan Return, file string, serverNode string, tempDir string) {
+	server := getServerIP(serverNode)
+	log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverIPAddress": server, "serverNode": serverNode,}).Trace("Resolved node to IP")
 
 	conn, err := net.DialTimeout(connType, server, 6*time.Second)
 
@@ -167,7 +174,7 @@ func downloadFile(finished chan Return, file string, server string, tempDir stri
 		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,}).Trace(file + " exist on this server.")
 	}
 
-	fileSizeReceived := make([]byte, 20)
+	fileSizeReceived := make([]byte, 40)
 	conn.Read(fileSizeReceived)
 	fileSize, _ := strconv.ParseInt(strings.Trim(string(fileSizeReceived), ":"), 10, 64)
 
@@ -192,6 +199,33 @@ func downloadFile(finished chan Return, file string, server string, tempDir stri
 	log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server, "fileSize": fileSize,}).Trace("File "+file +" has been downloaded.")
 	finished <- Return{fileSize, true}
 	return
+}
+
+
+func getServerIP(server string) string {
+	nodePort := strings.Split(server, ":")
+	node, port := nodePort[0], nodePort[1]
+	// creates the in-cluster config
+	config, err := rest.InClusterConfig()
+	config.BearerTokenFile = "/var/run/secrets/kubernetes.io/podwatcher/token"
+	if err != nil {
+		panic(err.Error())
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
+		FieldSelector: "spec.nodeName="+node, LabelSelector: "app=csi-f3-node"})
+	if err != nil {
+		panic(err.Error())
+	}
+	if (len(pods.Items) > 1) {
+		fmt.Println("!!!")
+	}
+	return pods.Items[0].Status.PodIP + ":" + port
 }
 
 //It extracts one server from the input list of servers coming from FUSE driver either randomly or fastest one
