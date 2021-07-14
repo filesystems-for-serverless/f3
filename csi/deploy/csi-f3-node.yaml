@@ -15,7 +15,7 @@ spec:
       labels:
         app: csi-f3-node
     spec:
-      hostNetwork: true  # original f3 connection would be broken without hostNetwork setting
+      #hostNetwork: true  # original f3 connection would be broken without hostNetwork setting
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/os: linux
@@ -116,6 +116,8 @@ spec:
               mountPath: /mnt/local-cache/
             - name: f3
               mountPath: /f3/
+            - name: token
+              mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: server-uds
           #image: docker.io/rishabh0202/fuse-uds:v1
           image: kubes1:5000/f3/transfer-client-server:latest
@@ -159,3 +161,46 @@ spec:
           hostPath:
             path: /mnt/local-cache
             type: Directory
+        - name: token
+          secret:
+            secretName: pod-watcher-token
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-watcher
+  namespace: default
+secrets:
+- name: pod-watcher-token
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: default
+  name: f3-pod-watcher
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cnsbench-binding
+subjects:
+  - kind: ServiceAccount
+    name: pod-watcher
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: f3-pod-watcher
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pod-watcher-token
+  namespace: default
+  annotations:
+    kubernetes.io/service-account.name: pod-watcher
+type: kubernetes.io/service-account-token
