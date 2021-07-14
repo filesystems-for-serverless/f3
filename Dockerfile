@@ -18,7 +18,7 @@ FROM ubuntu AS builder
 COPY fuse/libfuse/include /libfuse/include
 COPY fuse/cxxopts.hpp fuse/f3.cc fuse/uds_client.cc fuse/libfuse/build/lib/libfuse3.a /libfuse/
 RUN apt update && apt install -y build-essential
-RUN g++ -Wall /libfuse/f3.cc /libfuse/uds_client.cc /libfuse/libfuse3.a -I/libfuse/faas/ -I/libfuse/include -o /libfuse/f3-fuse-driver -pthread -ldl
+RUN g++ -Wall /libfuse/f3.cc /libfuse/uds_client.cc /libfuse/libfuse3.a -I/libfuse/faas/ -I/libfuse/include -o /libfuse/f3-fuse-driver -pthread -ldl -DHAVE_SETXATTR -g
 
 #FROM k8s.gcr.io/build-image/debian-base-${ARCH}:v2.1.3
 FROM ubuntu
