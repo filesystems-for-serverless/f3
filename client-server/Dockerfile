@@ -9,7 +9,7 @@ ADD src/server .
 RUN go mod init main
 RUN go mod tidy
 RUN go build client.go
-RUN go build server.go 
+RUN go build server.go
 
 FROM alpine:3.14
 COPY --from=build /app /app
