@@ -48,6 +48,8 @@ int download_file(const char *uds_path, char *path, char *servers) {
 	}
 
 	char buf[100];
+	bzero(buf, 100);
+	printf("servers: %s path: %s\n", servers, path);
 	int len = snprintf(buf, sizeof(buf), "%s,%s\n", path, servers);
 	if (len < 0) {
 		return -errno;

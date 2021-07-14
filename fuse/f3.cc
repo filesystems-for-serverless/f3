@@ -1185,8 +1185,10 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         F3_LOG("Needs download");
 
         char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
         f3_get_filepath(inode.fd, rel_path, PATH_MAX);
         char servers[100];
+        bzero(servers, 100);
         f3_get_servers(inode.fd, servers, 100);
 
         auto ret = download_file(uds_path.c_str(), rel_path, servers);
