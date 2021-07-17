@@ -83,7 +83,7 @@
 
 using namespace std;
 
-#define F3_LOG(fmt, ...) do { fprintf(stderr, "F3: line %d: " fmt "\n", __LINE__, ##__VA_ARGS__); }while(0)
+#define F3_LOG(fmt, ...) do { fprintf(stderr, "F3: line %d %s: " fmt "\n", __LINE__, fs.pod_uuid.c_str(), ##__VA_ARGS__); }while(0)
 #define F3_REPLY_ERR(req, err) do { if (err == 0) { fuse_reply_err(req, err); } else { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); } } while(0)
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
@@ -167,6 +167,7 @@ struct Fs {
     bool nosplice;
     bool nocache;
     std::string address;
+    std::string pod_uuid;
 };
 static Fs fs{};
 
@@ -1532,7 +1533,8 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         ("single", "Run single-threaded")
         ("a,address", "Address of this node's transfer server", cxxopts::value<std::string>())
         ("idroot", "Directory to use as root of local cache", cxxopts::value<std::string>())
-        ("s,socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>());
+        ("s,socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>())
+        ("pod-uuid", "UUID of pod driver is running for", cxxopts::value<std::string>());
 
     // FIXME: Find a better way to limit the try clause to just
     // opt_parser.parse() (cf. https://github.com/jarro2783/cxxopts/issues/146)
@@ -1563,6 +1565,10 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
 
     if (options.count("socket-path")) {
         uds_path = options["socket-path"].as<std::string>();
+    }
+
+    if (options.count("pod-uuid")) {
+        fs.pod_uuid = options["pod-uuid"].as<std::string>();
     }
 
     fs.debug = options.count("debug") != 0;

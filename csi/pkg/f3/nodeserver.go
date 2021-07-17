@@ -108,8 +108,11 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		}
 	}
 
-	klog.Infof("Running ", "/f3-fuse-driver" + " " + cephMount + " " + targetPath)
-	cmd := exec.Command("/f3-fuse-driver", "--nosplice", "--debug", "--nocache", "--address", ns.Driver.nodeID+":9999", "--idroot", ns.Driver.tempdir, "--socket-path", ns.Driver.socketAddress, cephMount, targetPath)
+	//klog.Infof("Running ", "/f3-fuse-driver" + " " + cephMount + " " + targetPath)
+	//klog.Infof("Running", "/f3-fuse-driver --nosplice --debug --nocache --address " + ns.Driver.nodeID+":9999 --idroot " + ns.Driver.tempdir + " --socket-path " + ns.Driver.socketAddress + " --pod-uuid " + podUUID[0:8] + " " + cephMount + " " + targetPath)
+	//cmd := exec.Command("/f3-fuse-driver", "--nosplice", "--debug", "--nocache", "--address", ns.Driver.nodeID+":9999", "--idroot", ns.Driver.tempdir, "--socket-path", ns.Driver.socketAddress, "--pod-uuid", podUUID[0:8], cephMount, targetPath)
+	klog.Infof("Running", "/f3-fuse-driver --debug --nocache --address " + ns.Driver.nodeID+":9999 --idroot " + ns.Driver.tempdir + " --socket-path " + ns.Driver.socketAddress + " --pod-uuid " + podUUID[0:8] + " " + cephMount + " " + targetPath)
+	cmd := exec.Command("/f3-fuse-driver", "--debug", "--nocache", "--address", ns.Driver.nodeID+":9999", "--idroot", ns.Driver.tempdir, "--socket-path", ns.Driver.socketAddress, "--pod-uuid", podUUID[0:8], cephMount, targetPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -117,6 +120,12 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	ns.fuseProcs[volumeID] = cmd
+
+	go func(cmd *exec.Cmd, podUUID string) {
+		err := cmd.Wait()
+		klog.Infof("XXX %v", podUUID);
+		klog.Infof("Error %v", err)
+	}(cmd, podUUID[0:8])
 
 	/*
 	go func(cephMount, targetPath string) {
