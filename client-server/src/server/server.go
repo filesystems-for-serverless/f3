@@ -14,7 +14,6 @@ import (
 
 const(
 	connType = "tcp"
-	BUFFERSIZE = 4096
 )
 
 func main(){
@@ -87,15 +86,10 @@ func handleConnection(conn net.Conn, temp_dir string){
 	}
 	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Trace("Sending filesize: "+fmt.Sprint(fileInfo.Size()))
 	
-	sendBuffer := make([]byte, BUFFERSIZE)
-	for {
-		_, err = file.Read(sendBuffer)
-		if err == io.EOF {
-			break
-		}
-		conn.Write(sendBuffer)
-	}
+	io.Copy(conn, file)
 	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Info("File has been send.")
+
+	conn.Close()
 }
 
 func fillString(retunString string, toLength int) string {

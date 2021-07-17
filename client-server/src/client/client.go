@@ -24,7 +24,6 @@ import (
 
 const (
 	connType           = "tcp"
-	BUFFERSIZE         = 4096
 )
 
 type Return struct {
@@ -193,14 +192,12 @@ func downloadFile(finished chan Return, file string, serverNode string, tempDir 
 	defer f.Close()
 
 	var receivedBytes int64
-	for {
-		if (fileSize - receivedBytes) <= BUFFERSIZE {
-			io.CopyN(f, conn, (fileSize - receivedBytes))
-			conn.Read(make([]byte, (receivedBytes+BUFFERSIZE)-fileSize))
-			break
-		}
-		io.CopyN(f, conn, BUFFERSIZE)
-		receivedBytes += BUFFERSIZE
+	receivedBytes, err = io.Copy(f, conn)
+	if fileSize != receivedBytes {
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,"fileSize": fileSize, "receivedBytes": receivedBytes,}).Trace("UUUU")
+	}
+	if err != nil {
+		log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server,"fileSize": fileSize,}).Error("Error creating new file: ", err.Error())
 	}
 	log.WithFields(log.Fields{"thread": "client.receiver","fileName": file, "serverAddress": server, "fileSize": fileSize,}).Trace("File "+file +" has been downloaded.")
 	finished <- Return{fileSize, true}
