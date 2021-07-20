@@ -105,8 +105,8 @@ func NewNodeServer(n *Driver, mounter mount.Interface) *NodeServer {
 	return &NodeServer{
 		Driver:  n,
 		mounter: mounter,
-		//fuseProcs: make(map[string]exec.*Cmd),
 		fuseProcs: make(map[string]*exec.Cmd),
+		fuseProcsCount: make(map[string]int),
 	}
 }
 
