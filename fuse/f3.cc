@@ -87,8 +87,8 @@ using namespace std;
 #define F3_REPLY_ERR(req, err) do { if (err == 0) { fuse_reply_err(req, err); } else { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); } } while(0)
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
-static std::string uds_path;
-int download_file(const char *uds_path, char *path, char *servers);
+int setup_conn(const char *uds_path);
+long int download_file(int fd, char *path, char *servers, size_t end_byte);
 
 /* We are re-using pointers to our `struct sfs_inode` and `struct
    sfs_dirp` elements as inodes and file handles. This means that we
@@ -137,6 +137,9 @@ struct Inode {
     uint64_t nlookup {0};
     bool is_id {false};
     bool needs_download{false};
+    uint64_t bytes_downloaded{0};
+    char *servers;
+    char *fname;
     std::mutex m;
 
     // Delete copy constructor and assignments. We could implement
@@ -168,6 +171,7 @@ struct Fs {
     bool nocache;
     std::string address;
     std::string pod_uuid;
+    int client_fd;
 };
 static Fs fs{};
 
@@ -393,6 +397,28 @@ static void sfs_init(void *userdata, fuse_conn_info *conn) {
         conn->want |= FUSE_CAP_SPLICE_READ;
 }
 
+static size_t f3_get_size_xattr(int fd) {
+    size_t ret;
+
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
+    if (newfd == -1) {
+        return 0;
+    }
+
+    char size_str[23];
+    bzero(size_str, sizeof(size_str));
+    ret = fgetxattr(newfd, "user.f3.size", size_str, sizeof(size_str));
+    if (ret < 0) {
+        perror("Get size");
+        ret = 0;
+    }
+
+    ret = strtol(size_str, NULL, 10);
+
+    close(newfd);
+    return ret;
+}
+
 
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
@@ -406,6 +432,14 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         F3_REPLY_ERR(req, errno);
         return;
     }
+
+    if (inode.is_id) {
+        auto xattr_size = f3_get_size_xattr(inode.fd);
+        if ((off_t)xattr_size > attr.st_size) {
+            attr.st_size = (off_t)xattr_size;
+        }
+    }
+
     //F3_LOG("%s: size: %lu", __func__, attr.st_size);
     fuse_reply_attr(req, &attr, fs.timeout);
 }
@@ -603,8 +637,15 @@ static int do_lookup(fuse_ino_t parent, const char *name,
                         saverr = errno;
                         F3_LOG("!!! %d", saverr);
                     }
-                    if (inode.is_id)
+                    if (inode.is_id) {
                         inode.needs_download = true;
+                        inode.fname = (char *)malloc(PATH_MAX);
+                        bzero(inode.fname, PATH_MAX);
+                        f3_get_filepath(inode.fd, inode.fname, PATH_MAX);
+                        inode.servers = (char *)malloc(100);
+                        bzero(inode.servers, 100);
+                        f3_get_servers(inode.fd, inode.servers, 100);
+                    }
                 }
                 // XXX Don't need to mark as ID, since the FS file is what's marked and
                 // we're creating the ID file/directory here
@@ -637,6 +678,14 @@ static int do_lookup(fuse_ino_t parent, const char *name,
             if (fs.debug)
                 cerr << "DEBUG: lookup(): fstatat failed" << endl;
             return saveerr;
+        }
+
+        // If the xattr says the size is bigger than what we just got, then producer
+        // must have written more since last time we updated our local copy - return
+        // the xattr reported size
+        auto xattr_size = f3_get_size_xattr(inode.fd);
+        if ((off_t)xattr_size > e->attr.st_size) {
+            e->attr.st_size = (off_t)xattr_size;
         }
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
@@ -1192,6 +1241,7 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     if (fs.timeout && fi->flags & O_APPEND)
         fi->flags &= ~O_APPEND;
 
+	/*
     if (inode.needs_download) {
         F3_LOG("Needs download");
 
@@ -1207,7 +1257,7 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
             perror("Download?");
         }
         inode.needs_download = false;
-    }
+    }*/
 
     /* Unfortunately we cannot use inode.fd, because this was opened
        with O_PATH (so it doesn't allow read/write access). */
@@ -1267,20 +1317,51 @@ static void do_read(fuse_req_t req, size_t size, off_t off, fuse_file_info *fi) 
     buf.buf[0].fd = fi->fh;
     buf.buf[0].pos = off;
 
+    //F3_LOG("%s: %lu %ld %lu\n", __func__, size, off, pthread_self());
+
     fuse_reply_data(req, &buf, FUSE_BUF_COPY_FLAGS);
 }
 
 static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
                      fuse_file_info *fi) {
     (void) ino;
-    //Inode& inode = get_inode(ino);
+    Inode& inode = get_inode(ino);
+
+    lock_guard<mutex> g {inode.m};
+    //F3_LOG("%s: %lu %ld %lu\n", __func__, size, off, pthread_self());
+    if (inode.needs_download && inode.bytes_downloaded < (off + size)) {
+        auto ret = download_file(fs.client_fd, inode.fname, inode.servers, off+size);
+        if (ret < 0)
+            perror("Download?");
+        else
+            inode.bytes_downloaded = ret;
+    }
     //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d fd: %lu", __func__, inode.id_fd, inode.fd, inode.is_id, fi->fh);
     do_read(req, size, off, fi);
 }
 
+static void f3_update_size_xattr(int fd, size_t size) {
+    char size_str[23];
+    bzero(size_str, sizeof(size_str));
+    int len = snprintf(size_str, sizeof(size_str), "%lu", size);
+
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
+    if (newfd == -1) {
+        perror("Opening new fd");
+        return;
+    }
+
+    auto res = fsetxattr(newfd, "user.f3.size", size_str, len, 0);
+    if (res == -1) {
+        perror("Size xattr");
+    }
+
+    close(newfd);
+}
 
 static void do_write_buf(fuse_req_t req, size_t size, off_t off,
-                         fuse_bufvec *in_buf, fuse_file_info *fi) {
+                         fuse_bufvec *in_buf, fuse_file_info *fi,
+                         Inode& inode) {
     fuse_bufvec out_buf = FUSE_BUFVEC_INIT(size);
     out_buf.buf[0].flags = static_cast<fuse_buf_flags>(
         FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
@@ -1292,18 +1373,22 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
     auto res = fuse_buf_copy(&out_buf, in_buf, FUSE_BUF_COPY_FLAGS);
     if (res < 0)
         F3_REPLY_ERR(req, (int)-res);
-    else
+    else {
+        if (inode.is_id) {
+            f3_update_size_xattr(inode.fd, off + res);
+        }
         fuse_reply_write(req, (size_t)res);
+    }
 }
 
 
 static void sfs_write_buf(fuse_req_t req, fuse_ino_t ino, fuse_bufvec *in_buf,
                           off_t off, fuse_file_info *fi) {
     (void) ino;
-    //Inode& inode = get_inode(ino);
+    Inode& inode = get_inode(ino);
     //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
     auto size {fuse_buf_size(in_buf)};
-    do_write_buf(req, size, off, in_buf, fi);
+    do_write_buf(req, size, off, in_buf, fi, inode);
 }
 
 
@@ -1580,7 +1665,17 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
     }
 
     if (options.count("socket-path")) {
-        uds_path = options["socket-path"].as<std::string>();
+        std::string uds_path = options["socket-path"].as<std::string>();
+        int timeout = 10;
+        while (timeout > 0 && (fs.client_fd = setup_conn(uds_path.c_str())) < 0) {
+            auto saverr = errno;
+            perror("Client conn");
+            if (saverr != ECONNREFUSED) {
+                break;
+            }
+            timeout--;
+            sleep(1);
+        }
     }
 
     if (options.count("pod-uuid")) {
