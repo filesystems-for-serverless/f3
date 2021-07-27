@@ -72,7 +72,6 @@ func handleConnection(conn net.Conn, temp_dir string){
 		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Info(err)
 		return
 	}
-	fileInfo, err := file.Stat()
 	if err != nil {
 		binary.Write(conn, binary.LittleEndian, false)
 		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Info(err)
@@ -80,14 +79,9 @@ func handleConnection(conn net.Conn, temp_dir string){
 	}
 	binary.Write(conn, binary.LittleEndian, true)
 	
-	err = binary.Write(conn, binary.LittleEndian, fileInfo.Size())
-	if err != nil{
-		log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "clientAddress": clientAddress,}).Error(err)
-	}
-	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Trace("Sending filesize: "+fmt.Sprint(fileInfo.Size()))
-	
 	io.Copy(conn, file)
-	log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname, "fileSize": fileInfo.Size(), "clientAddress": clientAddress,}).Info("File has been send.")
+
+	fmt.Println("Done sending file?")
 
 	conn.Close()
 }
