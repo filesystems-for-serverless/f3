@@ -1,9 +1,7 @@
-[submodule "libfuse"]
-	path = libfuse
-	url = https://github.com/libfuse/libfuse.git
 [submodule "fuse/libfuse"]
 	path = fuse/libfuse
-	url = https://github.com/libfuse/libfuse.git
+	url = https://github.com/pzoxiuv/libfuse.git
+	branch = f3
 [submodule "openwhisk"]
 	path = openwhisk
 	url = https://github.com/pzoxiuv/openwhisk.git
