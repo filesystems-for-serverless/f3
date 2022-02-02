@@ -6,5 +6,5 @@
 	url = https://github.com/libfuse/libfuse.git
 [submodule "openwhisk"]
 	path = openwhisk
-	url = /srv/git/openwhisk
+	url = https://github.com/pzoxiuv/openwhisk.git
 	branch = f3
