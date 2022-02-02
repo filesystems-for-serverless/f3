@@ -101,22 +101,23 @@ spec:
             - name: f3
               mountPath: /f3/
             - name: mnt-dir
-              mountPath: /id/
+              mountPath: /mnt/
+            - name: token
+              mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: client-uds
           #image: docker.io/rishabh0202/fuse-uds:v1
           image: kubes1:5000/f3/transfer-client-server:latest
           imagePullPolicy: Always
           command: ["/app/client"]
           args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/"]
-          resources:
-            limits:
-              memory: 200Mi
-            requests:
-              cpu: 100m
-              memory: 200Mi
+            #args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/ramdisk"]
+            #resources:
+            #requests:
+            #  cpu: 100m
+            #  memory: 200Mi
           volumeMounts:
             - name: mnt-dir
-              mountPath: /mnt/local-cache/
+              mountPath: /mnt/
             - name: f3
               mountPath: /f3/
             - name: token
@@ -126,23 +127,24 @@ spec:
           image: kubes1:5000/f3/transfer-client-server:latest
           imagePullPolicy: Always
           command: ["/app/server"]
-          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/"]
+          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/", "-socket-file", "/f3/fuse-server.sock"]
+            #args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/ramdisk", "-socket-file", "/f3/fuse-server.sock"]
           ports:
             - containerPort: 9999
-          resources:
-            limits:
-              memory: 200Mi
-            requests:
-              cpu: 100m
-              memory: 200Mi
+              #resources:
+            #requests:
+            #  cpu: 100m
+            #  memory: 200Mi
           volumeMounts:
             - name: mnt-dir
-              mountPath: /mnt/local-cache/
+              mountPath: /mnt/
+            - name: f3
+              mountPath: /f3/
       terminationGracePeriodSeconds: 30
       volumes:
       - name: mnt-dir
         hostPath:
-          path: /mnt/local-cache/
+          path: /mnt/
           type: Directory
       terminationGracePeriodSeconds: 30
       volumes:
@@ -166,11 +168,14 @@ spec:
           emptyDir: {}
         - name: mnt-dir
           hostPath:
-            path: /mnt/local-cache
+            path: /mnt/
             type: Directory
         - name: token
           secret:
             secretName: pod-watcher-token
+        - name: token-ow
+          secret:
+            secretName: pod-watcher-token-ow
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -183,12 +188,12 @@ secrets:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  namespace: default
+  #namespace: default
   name: f3-pod-watcher
 rules:
 - apiGroups: [""] # "" indicates the core API group
-  resources: ["pods"]
-  verbs: ["get", "watch", "list"]
+  resources: ["pods", "persistentvolumeclaims"]
+  verbs: ["get", "watch", "list", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -83,12 +83,36 @@
 
 using namespace std;
 
+struct download_info {
+    int fd;
+    char *path;
+    char *servers;
+    //char *sources;
+    size_t end_byte;
+    int *download_done;
+};
+
+struct move_info {
+    char *client_uds_path;
+    char *old_path;
+    char *new_path;
+    char *servers;
+};
+
 #define F3_LOG(fmt, ...) do { fprintf(stderr, "F3: line %d %s: " fmt "\n", __LINE__, fs.pod_uuid.c_str(), ##__VA_ARGS__); }while(0)
 #define F3_REPLY_ERR(req, err) do { if (err == 0) { fuse_reply_err(req, err); } else { fprintf(stderr, "ERROR: line %d (%d)\n", __LINE__, err); fuse_reply_err(req, err); } } while(0)
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
+#define PRINT_TIME do { clock_gettime(CLOCK_MONOTONIC, &timespec_g); fprintf(stderr, "%d %d\n", __LINE__, timespec_g.tv_nsec); }
+
+struct timespec timespec_g;
+
 int setup_conn(const char *uds_path);
 long int download_file(int fd, char *path, char *servers, size_t end_byte);
+std::string client_uds_path;
+void *download_file_thread(void *ptr);
+void *move_file_thread(void *ptr);
+int send_fname_done(int fd, char *fname);
 
 /* We are re-using pointers to our `struct sfs_inode` and `struct
    sfs_dirp` elements as inodes and file handles. This means that we
@@ -139,8 +163,13 @@ struct Inode {
     bool needs_download{false};
     uint64_t bytes_downloaded{0};
     char *servers;
-    char *fname;
+    //char *fname;
     std::mutex m;
+    int client_fd;
+    int download_done{0};
+    pthread_t download_thread;
+    size_t size{0};
+    size_t target_size{0};
 
     // Delete copy constructor and assignments. We could implement
     // move if we need it.
@@ -171,7 +200,7 @@ struct Fs {
     bool nocache;
     std::string address;
     std::string pod_uuid;
-    int client_fd;
+    int server_fd;
 };
 static Fs fs{};
 
@@ -202,7 +231,7 @@ static bool f3_is_id_ext(const char *name) {
 
 
 // Gets the path of file relative to source directory
-static int f3_get_rel_path(int fd, char *full_path) {
+static int f3_get_full_path(int fd, char *full_path) {
     char proc_path[PATH_MAX];
     sprintf(proc_path, "/proc/self/fd/%i", fd);
     int len = readlink(proc_path, full_path, PATH_MAX);
@@ -215,6 +244,7 @@ static int f3_get_rel_path(int fd, char *full_path) {
 static int f3_get_full_fd(int fd, mode_t mode) {
     char buf[64];
     sprintf(buf, "/proc/self/fd/%i", fd);
+    F3_LOG("OPEN %d\n", fd);
     return open(buf, mode);
 }
 
@@ -222,6 +252,7 @@ static int f3_mark_as_id(int fd, int root_dir_len) {
     int res = 0;
     auto saveerr = ENOMEM;
 
+    F3_LOG("%s", __func__);
     auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
@@ -240,17 +271,23 @@ static int f3_mark_as_id(int fd, int root_dir_len) {
         goto out;
     }
 
-    // Want the file path relative to the Ceph mountpoint
-    char full_path[PATH_MAX];
-    memset(full_path, 0, PATH_MAX);
-    res = f3_get_rel_path(newfd, full_path);
-    if (res < 0) {
-        saveerr = errno;
-        goto out;
+out:
+    close(newfd);
+    errno = saveerr;
+    return res;
+}
+
+static int f3_update_servers(int fd, char *servers) {
+    int res = 0;
+    auto saveerr = ENOMEM;
+
+    F3_LOG("%s", __func__);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
+    if (newfd == -1) {
+        return 0;
     }
-    //cerr << "F3: full path: " << full_path << " rel path: " << full_path + fs.source.length() << endl;
-    F3_LOG("full path: %s rel path: %s", full_path, full_path + root_dir_len);
-    res = fsetxattr(fd, "user.f3.filepath", full_path + root_dir_len, strlen(full_path + root_dir_len), 0);
+
+    res = fsetxattr(newfd, "user.f3.servers", servers, strlen(servers), 0);
     if (res == -1) {
         saveerr = errno;
         goto out;
@@ -262,6 +299,7 @@ out:
     return res;
 }
 
+
 static int f3_is_id(int fd) {
     char attr[10];
     int ret = 1;
@@ -269,6 +307,7 @@ static int f3_is_id(int fd) {
 
     // fd might have been opened in a mode that doesn't allow using
     // fgetxattr (e.g. O_PATH)
+    F3_LOG("%s", __func__);
     auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
@@ -303,6 +342,7 @@ static bool f3_is_new_id(fuse_ino_t parent, const char *name) {
 static int f3_get_servers(int fd, char *servers, size_t size) {
     int ret = 0;
 
+    F3_LOG("%s", __func__);
     auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
@@ -318,27 +358,9 @@ static int f3_get_servers(int fd, char *servers, size_t size) {
     return ret;
 }
 
-
-static int f3_get_filepath(int fd, char *filepath, size_t size) {
-    int ret = 0;
-
-    auto newfd = f3_get_full_fd(fd, O_RDONLY);
-    if (newfd == -1) {
-        return 0;
-    }
-
-    ret = fgetxattr(newfd, "user.f3.filepath", filepath, size);
-    if (ret < 0) {
-        perror("uh50");
-    }
-
-    close(newfd);
-
-    return ret;
-}
-
 static int f3_make_id_fs(fuse_ino_t ino) {
     Inode& inode = get_inode(ino);
+    F3_LOG("%s", __func__);
     auto fs_fd = f3_get_full_fd(inode.fd, O_RDWR);
     auto id_fd = f3_get_full_fd(inode.id_fd, O_RDWR);
     int saverr = 0;
@@ -391,15 +413,44 @@ static void sfs_init(void *userdata, fuse_conn_info *conn) {
     // Use splicing if supported. Since we are using writeback caching
     // and readahead, individual requests should have a decent size so
     // that splicing between fd's is well worth it.
-    if (conn->capable & FUSE_CAP_SPLICE_WRITE && !fs.nosplice)
+    if (conn->capable & FUSE_CAP_SPLICE_WRITE && !fs.nosplice) {
+        F3_LOG("Enabling write splicing?\n");
         conn->want |= FUSE_CAP_SPLICE_WRITE;
-    if (conn->capable & FUSE_CAP_SPLICE_READ && !fs.nosplice)
+    }
+    if (conn->capable & FUSE_CAP_SPLICE_READ && !fs.nosplice) {
+        F3_LOG("Enabling read splicing?\n");
         conn->want |= FUSE_CAP_SPLICE_READ;
+    }
+    //conn->want |= FUSE_CAP_SPLICE_MOVE;
+}
+
+static void f3_update_size_xattr(int fd, size_t size) {
+    char size_str[23];
+    bzero(size_str, sizeof(size_str));
+    int len = snprintf(size_str, sizeof(size_str), "%lu", size);
+
+    F3_LOG("%s", __func__);
+    auto newfd = f3_get_full_fd(fd, O_RDONLY);
+    if (newfd == -1) {
+        perror("Opening new fd");
+        return;
+    }
+
+    auto res = fsetxattr(newfd, "user.f3.size", size_str, len, 0);
+    if (res == -1) {
+        perror("Size xattr");
+    }
+
+    F3_LOG("%s: set %s %d", __func__, size_str, len);
+
+    close(newfd);
 }
 
 static size_t f3_get_size_xattr(int fd) {
     size_t ret;
 
+    //PRINT_TIME
+    F3_LOG("%s", __func__);
     auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
         return 0;
@@ -423,7 +474,8 @@ static size_t f3_get_size_xattr(int fd) {
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
     Inode& inode = get_inode(ino);
-    //F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
+    //if ((long unsigned int)ino != 1)
+    //    F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.is_id);
 
     struct stat attr;
     auto res = fstatat(INODE(inode), "", &attr,
@@ -434,13 +486,25 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     }
 
     if (inode.is_id) {
+        /*
         auto xattr_size = f3_get_size_xattr(inode.fd);
         if ((off_t)xattr_size > attr.st_size) {
             attr.st_size = (off_t)xattr_size;
+        }*/
+        //attr.st_size = 20485760000;
+        //attr.st_size = 4194304;
+        if (inode.target_size == 0) {
+            inode.target_size = f3_get_size_xattr(inode.fd);
+        }
+        //F3_LOG("Should replace size %ld with %ld ???\n", attr.st_size, inode.target_size);
+        if ((long int)inode.target_size > attr.st_size) {
+            //F3_LOG("Replacing size %ld with %ld\n", attr.st_size, inode.target_size);
+            attr.st_size = inode.target_size;
         }
     }
 
-    //F3_LOG("%s: size: %lu", __func__, attr.st_size);
+    //if ((long unsigned int)ino != 1)
+    //    F3_LOG("%s: size: %lu", __func__, attr.st_size);
     fuse_reply_attr(req, &attr, fs.timeout);
 }
 
@@ -638,13 +702,22 @@ static int do_lookup(fuse_ino_t parent, const char *name,
                         F3_LOG("!!! %d", saverr);
                     }
                     if (inode.is_id) {
+                        F3_LOG("%s: inode: %p needs download: %d\n", __func__, &inode, inode.needs_download);
                         inode.needs_download = true;
+                        /*
                         inode.fname = (char *)malloc(PATH_MAX);
                         bzero(inode.fname, PATH_MAX);
                         f3_get_filepath(inode.fd, inode.fname, PATH_MAX);
-                        inode.servers = (char *)malloc(100);
-                        bzero(inode.servers, 100);
-                        f3_get_servers(inode.fd, inode.servers, 100);
+                        */
+                        inode.servers = (char *)malloc(500);
+                        bzero(inode.servers, 500);
+                        f3_get_servers(inode.fd, inode.servers, 500);
+                        //PRINT_TIME
+                        inode.client_fd = setup_conn(client_uds_path.c_str());
+                        //PRINT_TIME
+                        if (inode.client_fd < 0) {
+                            perror("setup_conn");
+                        }
                     }
                 }
                 // XXX Don't need to mark as ID, since the FS file is what's marked and
@@ -658,6 +731,8 @@ static int do_lookup(fuse_ino_t parent, const char *name,
             //return saverr;
         }
         inode.id_fd = id_fd;
+
+        F3_LOG("XXX %d %d\n", inode.fd, inode.id_fd);
 
         fs_lock.unlock();
 
@@ -833,12 +908,13 @@ static void sfs_rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
     Inode& inode_p = get_inode(parent);
     lock_guard<mutex> g {inode_p.m};
     auto res = unlinkat(inode_p.fd, name, AT_REMOVEDIR);
-    if (res == -1)
+    if (res == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
     res = unlinkat(inode_p.id_fd, name, AT_REMOVEDIR);
     F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
-
 
 static void sfs_rename(fuse_req_t req, fuse_ino_t parent, const char *name,
                        fuse_ino_t newparent, const char *newname,
@@ -850,11 +926,65 @@ static void sfs_rename(fuse_req_t req, fuse_ino_t parent, const char *name,
         return;
     }
 
+    F3_LOG("%s: %s -> %s\n", __func__, name, newname);
+
+    // Need full paths to inform other servers
+    // Need to get full path before files have moved right?
+    auto old_fd = openat(inode_p.fd, name, O_NOFOLLOW);
+    if (old_fd < 0) {
+        perror("old_fd");
+    }
+    char old_full_path[PATH_MAX];
+    bzero(old_full_path, PATH_MAX);
+    f3_get_full_path(old_fd, old_full_path);
+    close(old_fd);
+
     auto res = renameat(inode_p.fd, name, inode_np.fd, newname);
-    if (res == -1)
+    if (res == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
     res = renameat(inode_p.id_fd, name, inode_np.id_fd, newname);
-    F3_REPLY_ERR(req, res == -1 ? errno : 0);
+    if (res == -1) {
+        F3_REPLY_ERR(req, errno);
+    }
+
+    auto new_fd = openat(inode_np.fd, newname, O_NOFOLLOW);
+    if (new_fd < 0) {
+        perror("new_fd");
+    }
+
+    char new_full_path[PATH_MAX];
+    bzero(new_full_path, PATH_MAX);
+    f3_get_full_path(new_fd, new_full_path);
+
+    // Can we assume that if not ID, servers will == ""?
+    // i.e., do we need to only do this if it's ID?
+    char *servers = (char *)malloc(500);
+    bzero(servers, 500);
+    f3_get_servers(new_fd, servers, 500);
+    F3_LOG("SERVERS: %s\n", servers);
+
+    if (strlen(servers) > 0) {
+        struct move_info *mv_info = (struct move_info *)malloc(sizeof(struct move_info));
+        // Shouldn't matter which one we use, inode_p/inode_np right?
+        mv_info->client_uds_path = strdup(client_uds_path.c_str());
+        mv_info->old_path = strdup(old_full_path+fs.source.length());
+        mv_info->new_path = strdup(new_full_path+fs.source.length());
+        mv_info->servers = strdup(servers);
+        pthread_t t_id;
+        auto ret = pthread_create(&t_id, NULL, move_file_thread, (void *)mv_info);
+        F3_LOG("%s: %s %s %s %ld %d\n", __func__, mv_info->old_path, mv_info->new_path, mv_info->servers, t_id, ret);
+        if (ret < 0) {
+            perror("pthread_create?");
+        }
+
+        F3_LOG("%s: started move thread...? %ld\n", __func__, t_id);
+    }
+
+    close(new_fd);
+
+    F3_REPLY_ERR(req, 0);
 }
 
 
@@ -887,11 +1017,15 @@ static void sfs_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
         }
     }
     auto res = unlinkat(inode_p.fd, name, 0);
-    if (res == -1)
+    if (res == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
     res = unlinkat(inode_p.id_fd, name, 0);
-    if (res == -1)
+    if (res == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
 
     F3_REPLY_ERR(req, 0);
 }
@@ -970,6 +1104,7 @@ static DirHandle *get_dir_handle(fuse_file_info *fi) {
 
 
 static void sfs_opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
+    F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
     Inode& inode = get_inode(ino);
     auto d = new (nothrow) DirHandle;
     if (d == nullptr) {
@@ -982,7 +1117,8 @@ static void sfs_opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     // access d until we've called fuse_reply_*.
     lock_guard<mutex> g {inode.m};
 
-    auto fd = openat(INODE(inode), ".", O_RDONLY);
+    //auto fd = openat(INODE(inode), ".", O_RDONLY);
+    auto fd = openat(inode.fd, ".", O_RDONLY);
     if (fd == -1)
         goto out_errno;
 
@@ -1020,7 +1156,7 @@ static bool is_dot_or_dotdot(const char *name) {
 static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
                     off_t offset, fuse_file_info *fi, int plus) {
 
-    //F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
+    F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
     auto d = get_dir_handle(fi);
     Inode& inode = get_inode(ino);
     lock_guard<mutex> g {inode.m};
@@ -1183,10 +1319,12 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         return;
     }
 
+    // XXX Need to close fd?
     if (f3_is_new_id(parent, name)) {
         f3_mark_as_id(fd, fs.source.length());
         f3_mark_as_id(id_fd, fs.idroot.length());
         fi->fh = id_fd;
+        close(fd);
     }
 
     // XXX Here is where we need to choose which fd to return to user
@@ -1241,23 +1379,58 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     if (fs.timeout && fi->flags & O_APPEND)
         fi->flags &= ~O_APPEND;
 
-	/*
     if (inode.needs_download) {
-        F3_LOG("Needs download");
+        F3_LOG("Needs download %ld", inode.download_thread);
+        fflush(stderr);
 
-        char rel_path[PATH_MAX];
-        bzero(rel_path, PATH_MAX);
-        f3_get_filepath(inode.fd, rel_path, PATH_MAX);
-        char servers[100];
-        bzero(servers, 100);
-        f3_get_servers(inode.fd, servers, 100);
+        // Skip if already downloading?
+        if (inode.download_thread == 0) {
+            
+            char full_path[PATH_MAX];
+            bzero(full_path, PATH_MAX);
+            f3_get_full_path(inode.fd, full_path);
+            //f3_get_filepath(inode.fd, rel_path, PATH_MAX);
+            char *servers = (char *)malloc(500);
+            bzero(servers, 500);
+            f3_get_servers(inode.fd, servers, 500);
 
-        auto ret = download_file(uds_path.c_str(), rel_path, servers);
-        if (ret < 0) {
-            perror("Download?");
+#if 0
+            char *sources = (char *)malloc(500);
+            bzero(sources, 500);
+            f3_get_sources(inode.fd, sources, 500);
+#endif
+
+            struct download_info *dl_info = (struct download_info *)malloc(sizeof(struct download_info));
+            dl_info->fd = inode.client_fd;
+            dl_info->path = strdup(full_path+fs.source.length());
+            dl_info->servers = strdup(servers);
+            //dl_info->sources = strdup(sources);
+            dl_info->end_byte = 0;
+            dl_info->download_done = &inode.download_done;
+            auto ret = pthread_create(&inode.download_thread, NULL, download_file_thread, (void *)dl_info);
+            F3_LOG("%s: %s %d %ld %d\n", __func__, dl_info->path, dl_info->fd, inode.download_thread, ret);
+            if (ret < 0) {
+                perror("pthread_create?");
+            }
+
+            F3_LOG("%s: started download thread...? %ld\n", __func__, inode.download_thread);
+            //PRINT_TIME
+
+            inode.target_size = f3_get_size_xattr(inode.fd);
+            servers = strcat(servers, ",");
+            servers = strcat(servers, fs.address.c_str());
+            f3_update_servers(inode.fd, servers);
+            free(servers);
+
+            //sources = strcat(sources, ",");
+            //f3_update_sources(inode.fd, sources);
+            //free(sources);
+            /*
+            auto ret = download_file(inode.client_fd, rel_path, servers, 0);
+            //inode.needs_download = false;
+            */
         }
-        inode.needs_download = false;
-    }*/
+    }
 
     /* Unfortunately we cannot use inode.fd, because this was opened
        with O_PATH (so it doesn't allow read/write access). */
@@ -1284,6 +1457,44 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     Inode& inode = get_inode(ino);
     lock_guard<mutex> g {inode.m};
+    F3_LOG("%s: when does this get called?", __func__);
+
+    // XXX This won't work, since server isn't opening the Ceph fd
+    // but rather the ID fd.  And want to support FSs that don't support
+    // xattrs (e.g. tempfs)...
+    // Maybe open another UDS connection to the server to tell it
+    // when we're done writing?
+    // Or just share an empty dir and check for the filename to be created
+    // there
+    /*
+    if (f3_mark_write_done(inode.fd) < 0) {
+        perror("mark done");
+        F3_LOG("!!!");
+    }*/
+
+    
+    auto fl = fcntl(fi->fh, F_GETFL);
+    F3_LOG("%s: %d %x", __func__, fl, fl);
+    if ((fl & O_RDWR) || (fl & O_WRONLY)) {
+        F3_LOG("%s: setting size xattr to %ld\n", __func__, inode.size);
+        f3_update_size_xattr(inode.fd, inode.size);
+    }
+    
+    // Only do this if we're the writing client
+    // Probably better to actually check if fd was open for writing
+// TODO
+#if 0
+    if (!inode.needs_download) {
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_filepath(inode.fd, rel_path, PATH_MAX);
+        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path);
+        if (send_fname_done(fs.server_fd, rel_path) < 0) {
+            perror("send_fname_done");
+        }
+    }
+#endif
+
     inode.nopen--;
     close(fi->fh);
     F3_REPLY_ERR(req, 0);
@@ -1327,36 +1538,88 @@ static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     (void) ino;
     Inode& inode = get_inode(ino);
 
-    lock_guard<mutex> g {inode.m};
+    F3_LOG("%s: %ld\n", __func__, (long unsigned)ino);
+
+    //lock_guard<mutex> g {inode.m};
+
+    /*
+    struct stat stat;
+    auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+    if (res == -1) {
+        F3_LOG("%s: !!!", __func__);
+    }*/
     //F3_LOG("%s: %lu %ld %lu\n", __func__, size, off, pthread_self());
+    // Check current file size.  If off+size > current size, check with uds client
+    // to see if conn closed(?)
+    // If not, wait...
+    //if (inode.needs_download && !inode.download_done) {
+    struct stat stat;
+    auto ret = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+    // target_size is the size we read on open from the xattr, which is set by the producer
+    // if our actual size (stat.st_size) is less than target_size, that means we must not have downloaded
+    // the whole file yet.  This is sort of akin to reading from a file whose write buffer hasn't been
+    // flushed yet, except since the download doesnt' start until the consumer opens the file it's like
+    // if the write buffer weren't flushed until the file was opened by a reader
+    // 
+    // Note that this won't really work for streaming: the size xattr only gets written by the producer
+    // when the file is closed, so if we're streaming that xattr will still be zero (or not set at all).
+    // In that case, we "fallback" to normal reading behavior: reads will just return EOF if we reach the
+    // end of what we've downloaded so far.  Use consumer.py or similar to handle that.
+    //
+    // XXX we need to skip this for non-id...
+    int timeout = 0;
+    off_t prev_size = 0;
+    int delay_us = 5;
+    //F3_LOG("%s: %ld %lu\n", __func__, stat.st_size, inode.target_size);
+    //while ((unsigned long)stat.st_size < inode.target_size && timeout > 0) {
+    // XXX why do we want (off + size) < inode.target_size ???
+    // ->>> If user just gives a "large enough" size, e.g. 4096, to read(2), then stat.st_size will always
+    // be < (off + size).
+    // But at the same time, we don't want to just always check if stat.st_size < inode.target_size, since
+    // if the file is large we may be reading just a chunk.  In which case we do want to compare stat.st_size
+    // to (off + size).
+    //
+    // SO:
+    // if (off + size) is > inode.target_size, we're reading till EOF: stat.st_size should == inode.target_size
+    // if (off + size) is < inode.target_size, we're reading just a section of the file: stat.st_size should == (off + size)
+    //while ((unsigned long)stat.st_size < (off + size) && (off + size) < inode.target_size && timeout < (10*1e6)) {
+    off_t target_size;
+    if ((off + size) >= inode.target_size)
+        target_size = inode.target_size;
+    else
+        target_size = off + size;
+    while (timeout < (10*1e6) && stat.st_size < target_size) {
+        F3_LOG("%s: waiting... %ld %lu %d %d\n", __func__, stat.st_size, inode.target_size, timeout, delay_us);
+        //sleep(1);
+        //usleep(500000);
+        usleep(delay_us);
+        ret = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+        if (ret < 0) {
+            perror("stat");
+        }
+        if (stat.st_size == prev_size) {
+            timeout += delay_us;
+            delay_us *= 2;
+        } else {
+            timeout = 0;
+        }
+        prev_size = stat.st_size;
+    }
+    if (timeout >= 10*1e6) {
+        F3_LOG("%s: !!! timeout reached\n", __func__);
+    }
+    F3_LOG("%s: done! %ld %lu %d\n", __func__, stat.st_size, inode.target_size, timeout);
+    /*
     if (inode.needs_download && inode.bytes_downloaded < (off + size)) {
         auto ret = download_file(fs.client_fd, inode.fname, inode.servers, off+size);
         if (ret < 0)
             perror("Download?");
         else
             inode.bytes_downloaded = ret;
-    }
+    }*/
     //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d fd: %lu", __func__, inode.id_fd, inode.fd, inode.is_id, fi->fh);
+    //F3_LOG("%s: %lu %lu %lu", __func__, size, off, (unsigned long)time(NULL));
     do_read(req, size, off, fi);
-}
-
-static void f3_update_size_xattr(int fd, size_t size) {
-    char size_str[23];
-    bzero(size_str, sizeof(size_str));
-    int len = snprintf(size_str, sizeof(size_str), "%lu", size);
-
-    auto newfd = f3_get_full_fd(fd, O_RDONLY);
-    if (newfd == -1) {
-        perror("Opening new fd");
-        return;
-    }
-
-    auto res = fsetxattr(newfd, "user.f3.size", size_str, len, 0);
-    if (res == -1) {
-        perror("Size xattr");
-    }
-
-    close(newfd);
 }
 
 static void do_write_buf(fuse_req_t req, size_t size, off_t off,
@@ -1375,7 +1638,17 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
         F3_REPLY_ERR(req, (int)-res);
     else {
         if (inode.is_id) {
-            f3_update_size_xattr(inode.fd, off + res);
+            lock_guard<mutex> g {inode.m};
+            // XXX For some reason the writes don't always come sequentially, so res+off isn't
+            // necessarily the furthest we've written so far
+            //F3_LOG("%s: %ld %ld %ld\n", __func__, res, off, off+res);
+            if ((off + res) < 0) {
+                F3_LOG("%s: !!! negative offset?", __func__);
+            }
+            if ((size_t)(off + res) > inode.size) {
+                inode.size = off + res;
+            }
+            //f3_update_size_xattr(inode.fd, off + res);
         }
         fuse_reply_write(req, (size_t)res);
     }
@@ -1472,6 +1745,8 @@ out:
     // looks up the "security.capability" attr
     if (saverr == ENODATA) {
         fuse_reply_err(req, saverr);
+        //fuse_reply_err(req, ENOSYS);
+        //fuse_reply_xattr(req, 0);
     } else {
         F3_REPLY_ERR(req, saverr);
     }
@@ -1530,8 +1805,10 @@ static void sfs_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
     char procname[64];
     sprintf(procname, "/proc/self/fd/%i", inode.fd);
     ret = setxattr(procname, name, value, size, flags);
-    if (ret == -1)
+    if (ret == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
 
     sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
     ret = setxattr(procname, name, value, size, flags);
@@ -1548,13 +1825,17 @@ static void sfs_removexattr(fuse_req_t req, fuse_ino_t ino, const char *name) {
 
     sprintf(procname, "/proc/self/fd/%i", inode.fd);
     ret = removexattr(procname, name);
-    if (ret == -1)
+    if (ret == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
 
     sprintf(procname, "/proc/self/fd/%i", inode.id_fd);
     ret = removexattr(procname, name);
-    if (ret == -1)
+    if (ret == -1) {
         F3_REPLY_ERR(req, errno);
+        return;
+    }
 
     ret = 0;
     if (strncmp(name, "user.f3.id", sizeof("user.f3.id")) == 0) {
@@ -1634,7 +1915,8 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         ("single", "Run single-threaded")
         ("a,address", "Address of this node's transfer server", cxxopts::value<std::string>())
         ("idroot", "Directory to use as root of local cache", cxxopts::value<std::string>())
-        ("s,socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>())
+        ("s,client-socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>())
+        ("server-socket-path", "Path of Unix Domain Socket for connecting to download server", cxxopts::value<std::string>())
         ("pod-uuid", "UUID of pod driver is running for", cxxopts::value<std::string>());
 
     // FIXME: Find a better way to limit the try clause to just
@@ -1664,12 +1946,16 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         fs.idroot = options["idroot"].as<std::string>();
     }
 
-    if (options.count("socket-path")) {
-        std::string uds_path = options["socket-path"].as<std::string>();
+    if (options.count("client-socket-path")) {
+        client_uds_path = options["client-socket-path"].as<std::string>();
+    }
+
+    if (options.count("server-socket-path")) {
+        std::string server_uds_path = options["server-socket-path"].as<std::string>();
         int timeout = 10;
-        while (timeout > 0 && (fs.client_fd = setup_conn(uds_path.c_str())) < 0) {
+        while (timeout > 0 && (fs.server_fd = setup_conn(server_uds_path.c_str())) < 0) {
             auto saverr = errno;
-            perror("Client conn");
+            perror("Server conn");
             if (saverr != ECONNREFUSED) {
                 break;
             }
@@ -1721,7 +2007,8 @@ int main(int argc, char *argv[]) {
     // Initialize filesystem root
     fs.root.fd = -1;
     fs.root.nlookup = 9999;
-    fs.timeout = options.count("nocache") ? 0 : 86400.0;
+    //fs.timeout = options.count("nocache") ? 0 : 86400.0;
+    fs.timeout = options.count("nocache") ? 0 : 0.000000001;
 
     struct stat stat;
     auto ret = lstat(fs.source.c_str(), &stat);
@@ -1743,7 +2030,7 @@ int main(int argc, char *argv[]) {
     fuse_args args = FUSE_ARGS_INIT(0, nullptr);
     if (fuse_opt_add_arg(&args, argv[0]) ||
         fuse_opt_add_arg(&args, "-o") ||
-        fuse_opt_add_arg(&args, "default_permissions,fsname=hpps") ||
+        fuse_opt_add_arg(&args, "default_permissions,fsname=hpps,allow_other") ||
         (options.count("debug-fuse") && fuse_opt_add_arg(&args, "-odebug")))
         errx(3, "ERROR: Out of memory");
 

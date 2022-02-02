@@ -6,3 +6,5 @@ metadata:
 provisioner: f3.csi.k8s.io
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
+parameters:
+  server: "/mnt/local-cache/tempdir/"

@@ -23,7 +23,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/mount"
+	//"k8s.io/utils/mount"
+	mount "k8s.io/mount-utils"
 )
 
 type Driver struct {
@@ -33,7 +34,8 @@ type Driver struct {
 
 	endpoint string
 
-	socketAddress string
+	clientSocketAddress string
+	serverSocketAddress string
 	tempdir	string
 
 	perm *uint32
@@ -63,7 +65,7 @@ var (
 	version = "3.0.0"
 )
 
-func NewF3Driver(nodeID, endpoint, socketAddress, tempdir string, perm *uint32) *Driver {
+func NewF3Driver(nodeID, endpoint, clientSocketAddress, serverSocketAddress, tempdir string, perm *uint32) *Driver {
 	klog.Infof("Driver: %v version: %v", DriverName, version)
 
 	n := &Driver{
@@ -73,7 +75,8 @@ func NewF3Driver(nodeID, endpoint, socketAddress, tempdir string, perm *uint32) 
 		endpoint: endpoint,
 		cap:      map[csi.VolumeCapability_AccessMode_Mode]bool{},
 		perm:     perm,
-		socketAddress:	socketAddress,
+		clientSocketAddress:	clientSocketAddress,
+		serverSocketAddress:	serverSocketAddress,
 		tempdir:	tempdir,
 	}
 
@@ -107,6 +110,8 @@ func NewNodeServer(n *Driver, mounter mount.Interface) *NodeServer {
 		mounter: mounter,
 		fuseProcs: make(map[string]*exec.Cmd),
 		fuseProcsCount: make(map[string]int),
+        namespaceMap: make(map[string]string),
+        targetPVCMap: make(map[string]string),
 	}
 }
 

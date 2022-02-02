@@ -14,8 +14,13 @@ all: f3-fuse-driver
 
 f3-fuse-driver: $(SOURCES)
 	$(CC) $(SOURCES) libfuse/build/lib/libfuse3.a -Wall -Ilibfuse/include -o f3-fuse-driver -pthread -ldl -DHAVE_SETXATTR -g
+	#$(CC) $(SOURCES) libfuse/build/lib/libfuse3.a -Wall -Ilibfuse/include -o f3-fuse-driver -pthread -ldl
 
 clean:
 	rm f3-fuse-driver
+
+copy-to-dev: f3-fuse-driver
+	kubectl cp f3-fuse-driver dev-pod-1:/fuse/f3-fuse-driver
+	kubectl cp f3-fuse-driver dev-pod-2:/fuse/f3-fuse-driver
 
 .PHONY: all clean

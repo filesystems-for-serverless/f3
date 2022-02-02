@@ -31,7 +31,8 @@ var (
 	endpoint = flag.String("endpoint", "unix://tmp/csi.sock", "CSI endpoint")
 	nodeID   = flag.String("nodeid", "", "node id")
 	perm     = flag.String("mount-permissions", "", "mounted folder permissions")
-	sockAddress = flag.String("socket-address", "/f3/fuse-client.sock", "socket address")
+	clientSockAddress = flag.String("client-socket-address", "/f3/fuse-client.sock", "socket address")
+	serverSockAddress = flag.String("server-socket-address", "/f3/fuse-server.sock", "socket address")
 	tempDir = flag.String("tempdir", "/id/tempdir/", "ID directory")
 )
 
@@ -65,6 +66,6 @@ func handle() {
 		parsedPerm = &permu32
 	}
 
-	d := f3.NewF3Driver(*nodeID, *endpoint, *sockAddress, *tempDir, parsedPerm)
+	d := f3.NewF3Driver(*nodeID, *endpoint, *clientSockAddress, *serverSockAddress, *tempDir, parsedPerm)
 	d.Run(false)
 }

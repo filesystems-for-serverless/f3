@@ -22,9 +22,7 @@ func reader(finished chan bool, r io.Reader) {
 }
 
 func main() {
-	socket_file := flag.String("socket-file", "/var/run/fuse-client.sock", "string")
-	//sending_add := flag.String("send-address", "127.0.0.1:9999, 127.127.127.2:9999, 130.245.126.199:9999", "string")
-	//file_name := flag.String("file-name", "test6.img", "string")
+	socket_file := flag.String("socket-file", "/var/run/fuse-server.sock", "string")
 	flag.Parse()
 
 	c, err := net.Dial("unix", *socket_file)
@@ -33,28 +31,16 @@ func main() {
 	}
 	defer c.Close()
 
-	/*
-	finished := make(chan bool)
-	go reader(finished, c)
-	msg := *file_name+","+*sending_add+"\n"
-	_, err = c.Write([]byte(msg))
-	if err != nil {
-		log.Fatal("Write error:", err)
-		return
-	}
-	fmt.Println("Client sent: ", msg)
-	<- finished*/
-
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		text, _ := reader.ReadString('\n')
 		c.Write([]byte(text))
-		buf := make([]byte, 10)
+		buf := make([]byte, 50)
 		n, err := c.Read(buf[:])
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		fmt.Printf("Got %v from ID client\n", string(buf[:n]))
+		fmt.Printf("Got %v from ID server\n", string(buf[:n]))
 	}
 }

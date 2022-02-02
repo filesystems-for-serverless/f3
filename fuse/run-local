@@ -1,0 +1,7 @@
+./f3-fuse-driver --idroot dirs/tempdir2 dirs/fsdir/ dirs/workdir2/ --nosplice --nocache --debug-fuse -a kubes1:9998 --client-socket-path dirs/client2.sock --server-socket-path dirs/server2.sock
+./client-server/build/client -in-pod=false -socket-file fuse/dirs/client2.sock -temp-dir fuse/dirs/tempdir2 -server-socket-file fuse/dirs/server2.sock
+./client-server/build/server -temp-dir fuse/dirs/tempdir2 -listen-port 9998 -socket-file fuse/dirs/server2.sock
+
+./f3-fuse-driver --idroot dirs/tempdir dirs/fsdir/ dirs/workdir/ --nosplice --nocache --debug-fuse -a kubes1:9999 --client-socket-path dirs/client.sock --server-socket-path dirs/server.sock
+./client-server/build/client -in-pod=false -socket-file fuse/dirs/client.sock -temp-dir fuse/dirs/tempdir -server-socket-file fuse/dirs/server.sock
+./client-server/build/server -temp-dir fuse/dirs/tempdir -listen-port 9999 -socket-file fuse/dirs/server.sock
