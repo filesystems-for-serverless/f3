@@ -63,8 +63,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          #image: mcr.microsoft.com/k8s/csi/f3-csi:latest
-          image: kubes1:5000/f3/f3-csi:latest
+          image: alexmerenstein/f3-csi:2.0.7
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -105,11 +104,10 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: client-uds
-          #image: docker.io/rishabh0202/fuse-uds:v1
-          image: kubes1:5000/f3/transfer-client-server:latest
+          image: alexmerenstein/f3-transfer-client-server:2.0.4
           imagePullPolicy: Always
           command: ["/app/client"]
-          args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/"]
+          args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/", "-server-address", "$(NODE_ID):9999"]
             #args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/ramdisk"]
             #resources:
             #requests:
@@ -123,8 +121,7 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: server-uds
-          #image: docker.io/rishabh0202/fuse-uds:v1
-          image: kubes1:5000/f3/transfer-client-server:latest
+          image: alexmerenstein/f3-transfer-client-server:2.0.4
           imagePullPolicy: Always
           command: ["/app/server"]
           args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/", "-socket-file", "/f3/fuse-server.sock"]

@@ -64,7 +64,7 @@ spec:
               memory: 20Mi
         - name: f3
           #image: mcr.microsoft.com/k8s/csi/f3-csi:latest
-          image: kubes1:5000/f3/f3-csi:latest
+          image: alexmerenstein/f3-csi:latest
           imagePullPolicy: Always
           securityContext:
             privileged: true
