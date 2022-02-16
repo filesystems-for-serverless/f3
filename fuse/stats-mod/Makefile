@@ -15,3 +15,6 @@ log:
 
 clean:
 	rm -rf *.o *.ko *.mod.* .c* .t*
+
+install:
+	bash install.sh
