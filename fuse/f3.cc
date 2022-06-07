@@ -568,6 +568,12 @@ static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
         if (fi)
             res = futimens(fi->fh, tv);
         else {
+// XXX build hack, this is set in config.h but we're not actually including that because
+// we don't set -DHAVE_CONFIG_H when we build f3.cc, since we just manually invoke g++
+// rather than use the libfuse build system.  Don't want to start including config.h now
+// in case one of the other things in there causes problems, so just manually set
+// HAVE_UTIMENSTAT here
+#define HAVE_UTIMENSAT
 #ifdef HAVE_UTIMENSAT
             char procname[64];
             sprintf(procname, "/proc/self/fd/%i", ifd);
