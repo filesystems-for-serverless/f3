@@ -63,7 +63,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: alexmerenstein/f3-csi:2.0.7
+          image: alexmerenstein/f3-csi:2.0.9
           imagePullPolicy: Always
           args:
             - "-v=5"
