@@ -501,6 +501,8 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
             //F3_LOG("Replacing size %ld with %ld\n", attr.st_size, inode.target_size);
             attr.st_size = inode.target_size;
         }
+
+        attr.st_blksize = 4194304;
     }
 
     //if ((long unsigned int)ino != 1)
@@ -764,6 +766,8 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         }
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
+
+        e->attr.st_blksize = 4194304;
     }
 
     return 0;
