@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import argparse
+import requests
+import sys
+import json
+import time
+
+from urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+# kc get secret owdev-whisk.auth -oyaml -nopenwhisk, this is the guest one
+# (maybe it's the same everywhere??)
+OW_AUTH='MjNiYzQ2YjEtNzFmNi00ZWQ1LThjNTQtODE2YWE0ZjhjNTAyOjEyM3pPM3haQ0xyTU42djJCS0sxZFhZRnBYbFBrY2NPRnFtMTJDZEFzTWdSVTRWck5aOWx5R1ZDR3VNREdJd1A='
+OW_SERVER='130.245.126.249:31001'
+OW_ACTION='cmd2'
+OW_BLOCKING_ACTION=True
+OW_GET_RESULT=True
+OW_PARAMS = {'blocking': OW_BLOCKING_ACTION, 'result': OW_GET_RESULT}
+OW_HEADERS = {'Content-Type': 'application/json', 'Authorization': f'Basic {OW_AUTH}'}
+F3_SEQ_ID = ''
+MOUNT_PATH='/var/data'
+TIMEOUT=300
+INTERVAL=5
+
+def wait_on_activation(activation_url, activation_id):
+    print(f'Waiting for activation {activation_id} to finish')
+    i = 0
+    while i < TIMEOUT:
+        r = requests.get(activation_url+activation_id, headers=OW_HEADERS, verify=False)
+        #print(r.text)
+        #print(r.status_code)
+        #print(r.url)
+        if r.status_code != 404:
+            return r.text
+
+        i += INTERVAL
+        time.sleep(INTERVAL)
+
+    print('TIMEOUT REACHED')
+    assert False
+
+def main(args):
+    OW_ACTION_URL=f'https://{args.ow_server}/api/v1/namespaces/_/actions/{args.ow_action}'
+    OW_ACTIVATION_URL=f'https://{args.ow_server}/api/v1/namespaces/_/activations/'
+
+    cmd = ' '.join(args.cmd)
+    data = {'command': cmd, 'f3SeqId': args.vol_list, 'mountPath': args.mount_path_list, 'f3Depth': str(0), 'logging-dir': args.logging_dir}
+
+    r = requests.post(OW_ACTION_URL, params=OW_PARAMS, json=data, headers=OW_HEADERS, verify=False)
+    if r.status_code == 202:
+        r_json = json.loads(r.text.replace('\n', '\\n'))
+        resp = wait_on_activation(OW_ACTIVATION_URL, r_json['activationId'])
+        r_json = json.loads(resp)
+        if 'stderr' in r_json["response"]["result"]:
+            print(f'stderr:\n{r_json["response"]["result"]["stderr"]}')
+        if 'stdout' in r_json["response"]["result"]:
+            print(f'stdout:\n{r_json["response"]["result"]["stdout"]}')
+    else:
+        try:
+            print(f'Status code: {r.status_code}')
+            r_json = json.loads(r.text.replace('\n', '\\n'))
+            if 'metadata' in r_json:
+                del r_json['metadata']['params']
+                print(f'metadata:\n{r_json["metadata"]}')
+            print(f'stderr:\n{r_json["stderr"]}')
+            print(f'stdout:\n{r_json["stdout"]}')
+        except Exception as e:
+            print(r.text)
+            print(e)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ow-action', required=False, default=OW_ACTION)
+    parser.add_argument('--ow-server', required=False, default=OW_SERVER)
+    parser.add_argument('--vol-list', required=False, default=F3_SEQ_ID)
+    parser.add_argument('--mount-path-list', required=False, default=MOUNT_PATH)
+    parser.add_argument('--logging-dir', required=False, default='')
+    parser.add_argument('cmd', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    main(args)
