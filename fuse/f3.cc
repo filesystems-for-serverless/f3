@@ -1501,18 +1501,15 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     
     // Only do this if we're the writing client
     // Probably better to actually check if fd was open for writing
-// TODO
-#if 0
     if (!inode.needs_download) {
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
-        f3_get_filepath(inode.fd, rel_path, PATH_MAX);
-        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path);
-        if (send_fname_done(fs.server_fd, rel_path) < 0) {
+        f3_get_full_path(inode.id_fd, rel_path);
+        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length()-1);
+        if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()-1) < 0) {
             perror("send_fname_done");
         }
     }
-#endif
 
     inode.nopen--;
     close(fi->fh);
