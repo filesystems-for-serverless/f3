@@ -21,6 +21,9 @@ import (
 	//"path"
 	"sync"
 	"os/exec"
+	"strings"
+	"crypto/sha256"
+	"encoding/hex"
 	//"io/ioutil"
 
     "k8s.io/apimachinery/pkg/api/errors"
@@ -127,15 +130,17 @@ func getF3PvcName(namespace string) (string, error) {
     return getPVCName("f3.role=f3", namespace)
 }
 
-func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (error) {
+func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (corev1.Pod, error) {
     clientset, err := getClientset()
     if err != nil {
-        return err
+        return corev1.Pod{}, err
     }
+
+    name := "target-pod-"+targetPVC+"-"+nodeID
 
     pod := &corev1.Pod {
         ObjectMeta: metav1.ObjectMeta {
-            Name: "target-pod-"+targetPVC+"-"+nodeID,
+            Name: name,
             Namespace: namespace,
             Labels: map[string]string {
                 "f3.role": "target-pod",
@@ -172,7 +177,15 @@ func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (error) {
     pod2, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
     klog.Infof("got this pod", pod2)
 
-    return err
+    if errors.IsAlreadyExists(err) {
+	klog.Info("Target pod already existed")
+    } else if err != nil {
+	return corev1.Pod{}, err
+    }
+
+    pod3, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+
+    return *pod3, err
 }
 
 func getCephPVC(namespace, targetPVC string) (corev1.PersistentVolumeClaim, error) {
@@ -227,7 +240,15 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     if err != nil {
         klog.Errorf(err.Error())
     }*/
-    workdir := "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/"+volumeID+"/globalmount"
+    var workdir string
+    if _, err := os.Stat("/var/lib/kubelet/plugins/kubernetes.io/csi/pv"); os.IsNotExist(err) {
+	    hasher := sha256.New()
+	    hasher.Write([]byte(volumeID))
+	    volumeIDSHA256 := hex.EncodeToString(hasher.Sum(nil))
+	    workdir = "/var/lib/kubelet/plugins/kubernetes.io/csi/f3.csi.k8s.io/"+volumeIDSHA256+"/globalmount"
+    } else {
+	    workdir = "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/"+volumeID+"/globalmount"
+    }
 
     ns.lock.Lock()
 	if _, exists := ns.fuseProcs[volumeID]; !exists {
@@ -238,14 +259,11 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
         }
         targetPVCName := pvc.Labels["f3.target-pvc"]
 
-        err = createTargetPod(namespace, targetPVCName, volumeID, ns.Driver.nodeID)
+	targetPod, err := createTargetPod(namespace, targetPVCName, volumeID, ns.Driver.nodeID)
         if err != nil {
-            if errors.IsAlreadyExists(err) {
-                klog.Info("Target pod already existed")
-            } else {
-                return nil, status.Error(codes.Internal, err.Error())
-            }
+            return nil, status.Error(codes.Internal, err.Error())
         }
+	klog.Infof("targetpod", targetPod)
 
         cephPVC, err := getCephPVC(namespace, targetPVCName)
         klog.Infof("cephPVC", cephPVC)
@@ -289,7 +307,12 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
         idroot := req.GetVolumeContext()["server"]
 
-        sourcedir := "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/"+cephPVC.Spec.VolumeName+"/globalmount"
+	var sourcedir string
+	if strings.Contains(*cephPVC.Spec.StorageClassName, "nfs") {
+	        sourcedir = "/var/lib/kubelet/pods/"+string(targetPod.UID)+"/volumes/kubernetes.io~nfs/"+cephPVC.Spec.VolumeName
+	} else {
+	        sourcedir = "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/"+cephPVC.Spec.VolumeName+"/globalmount"
+	}
 
         klog.Infof("sourcedir", sourcedir)
         //notMountPoint, err := ns.mounter.IsNotMountPoint(sourcedir)
@@ -305,7 +328,7 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
         podUID := req.GetVolumeContext()["csi.storage.k8s.io/pod.uid"]
 
-        klog.Infof("Running", "/f3-fuse-driver " + " --debug " + " --nocache " + " --single " + " --nosplice " + " --address " + ns.Driver.nodeID+":9999 " + " --idroot " + idroot + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + sourcedir + workdir)
+        klog.Infof("Running", "/f3-fuse-driver " + " --debug " + " --nocache " + " --single " + " --nosplice " + " --address " + ns.Driver.nodeID+":9999 " + " --idroot " + idroot + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + " " + sourcedir + " " + workdir)
         cmd := exec.Command("/f3-fuse-driver", "--debug", "--nocache", "--single", "--nosplice", "--address", ns.Driver.nodeID+":9999", "--idroot", idroot, "--client-socket-path", ns.Driver.clientSocketAddress, "--server-socket-path", ns.Driver.serverSocketAddress, "--pod-uuid", podUID[0:8], sourcedir, workdir)
 
 		cmd.Stdout = os.Stdout
