@@ -19,6 +19,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/os: linux
+      hostPID: true
       containers:
         - name: liveness-probe
           image: k8s.gcr.io/sig-storage/livenessprobe:v2.1.0
@@ -63,7 +64,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: alexmerenstein/f3-csi:2.0.9
+          image: alexmerenstein/f3-csi:2.0.10
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -99,6 +100,8 @@ spec:
               mountPropagation: "Bidirectional"
             - name: f3
               mountPath: /f3/
+            - name: log-dir
+              mountPath: /var/log/f3/
             - name: mnt-dir
               mountPath: /mnt/
             - name: token
@@ -145,6 +148,10 @@ spec:
           type: Directory
       terminationGracePeriodSeconds: 30
       volumes:
+        - name: log-dir
+          hostPath:
+            path: /var/log/f3
+            type: DirectoryOrCreate
         - name: socket-dir
           hostPath:
             path: /var/lib/kubelet/plugins/csi-f3plugin

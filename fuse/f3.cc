@@ -59,6 +59,7 @@
 #include <errno.h>
 #include <ftw.h>
 #include <fuse_lowlevel.h>
+#include <fuse.h>
 #include <inttypes.h>
 #include <string.h>
 #include <sys/file.h>
@@ -80,6 +81,8 @@
 #include <fstream>
 #include <thread>
 #include <iomanip>
+#include <algorithm>
+#include "pfs/procfs.hpp"
 
 using namespace std;
 
@@ -201,6 +204,7 @@ struct Fs {
     std::string address;
     std::string pod_uuid;
     int server_fd;
+    int file_logger_fd;
 };
 static Fs fs{};
 
@@ -397,6 +401,35 @@ static int get_fs_fd(fuse_ino_t ino) {
 static int get_fs_id_fd(fuse_ino_t ino) {
     int fd = get_inode(ino).id_fd;
     return fd;
+}
+
+static std::string get_pod_uid(fuse_req_t req) {
+    auto *fuse_ctx = fuse_req_ctx(req);
+
+    auto ppid = pfs::procfs().get_task(fuse_ctx->pid).get_stat().ppid;
+    printf("ppid=%d\n", ppid);
+
+    std::string cgroup = pfs::procfs().get_task(fuse_ctx->pid).get_cgroups()[0].pathname;
+    auto start = cgroup.find("kubepods-besteffort-pod") + sizeof("kubepods-besteffort-pod") - 1;
+
+    std::string pod_uid = cgroup.substr(start, 35);
+    std::replace(pod_uid.begin(), pod_uid.end(), '_', '-');
+
+    return pod_uid;
+}
+
+static void log_file(fuse_req_t req, int inode_fd, int flags) {
+    char full_path[PATH_MAX];
+    bzero(full_path, PATH_MAX);
+    f3_get_full_path(inode_fd, full_path);
+
+    char buf[PATH_MAX];
+    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path, flags);
+    auto res = write(fs.file_logger_fd, buf, len);
+    if (res < 0) {
+        perror("write");
+    }
+    F3_LOG("fd: %d\n", fs.file_logger_fd);
 }
 
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
@@ -1335,6 +1368,10 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         f3_mark_as_id(id_fd, fs.idroot.length());
         fi->fh = id_fd;
         close(fd);
+
+        if (fs.file_logger_fd > 0) {
+	    log_file(req, id_fd, fi->flags);
+        }
     }
 
     // XXX Here is where we need to choose which fd to return to user
@@ -1367,11 +1404,14 @@ static void sfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
     F3_REPLY_ERR(req, res == -1 ? errno : 0);
 }
 
-
 static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     Inode& inode = get_inode(ino);
 
     //F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
+
+    if (fs.file_logger_fd > 0 && inode.is_id) {
+	    log_file(req, inode.fd, fi->flags);
+    }
 
     /* With writeback cache, kernel may send read requests even
        when userspace opened write-only */
@@ -1927,6 +1967,7 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         ("idroot", "Directory to use as root of local cache", cxxopts::value<std::string>())
         ("s,client-socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>())
         ("server-socket-path", "Path of Unix Domain Socket for connecting to download server", cxxopts::value<std::string>())
+        ("file-logger-path", "Path of file for logging what files a pod accesses", cxxopts::value<std::string>())
         ("pod-uuid", "UUID of pod driver is running for", cxxopts::value<std::string>());
 
     // FIXME: Find a better way to limit the try clause to just
@@ -1974,8 +2015,19 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         }
     }
 
+    fs.file_logger_fd = 0;
     if (options.count("pod-uuid")) {
         fs.pod_uuid = options["pod-uuid"].as<std::string>();
+
+        std::string file_logger_path = "/var/log/f3/"+fs.pod_uuid+".files";
+        if (options.count("file-logger-path")) {
+            file_logger_path = options["file-logger-path"].as<std::string>();
+	}
+	fs.file_logger_fd = open(file_logger_path.c_str(), O_WRONLY | O_APPEND | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+        if (fs.file_logger_fd <= 0) {
+            perror("file-logger-path");
+        }
+	F3_LOG("logger fd: %d\n", fs.file_logger_fd);
     }
 
     fs.debug = options.count("debug") != 0;
