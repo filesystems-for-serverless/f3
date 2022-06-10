@@ -432,7 +432,7 @@ static void log_file(fuse_req_t req, int inode_fd, int flags) {
     f3_get_full_path(inode_fd, full_path);
 
     char buf[PATH_MAX];
-    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path, flags);
+    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path+fs.idroot.length()-1, flags);
 
     if (fs.file_logger_fd) {
 	    auto res = write(fs.file_logger_fd, buf, len);
@@ -1427,7 +1427,7 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     //F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
 
     if (fs.file_logger_fd > 0 && inode.is_id) {
-	    log_file(req, inode.fd, fi->flags);
+	    log_file(req, inode.id_fd, fi->flags);
     }
 
     /* With writeback cache, kernel may send read requests even
