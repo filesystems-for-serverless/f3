@@ -403,6 +403,35 @@ static int get_fs_id_fd(fuse_ino_t ino) {
     return fd;
 }
 
+static std::string get_pod_uid(fuse_req_t req) {
+    auto *fuse_ctx = fuse_req_ctx(req);
+
+    auto ppid = pfs::procfs().get_task(fuse_ctx->pid).get_stat().ppid;
+    printf("ppid=%d\n", ppid);
+
+    std::string cgroup = pfs::procfs().get_task(fuse_ctx->pid).get_cgroups()[0].pathname;
+    auto start = cgroup.find("kubepods-besteffort-pod") + sizeof("kubepods-besteffort-pod") - 1;
+
+    std::string pod_uid = cgroup.substr(start, 35);
+    std::replace(pod_uid.begin(), pod_uid.end(), '_', '-');
+
+    return pod_uid;
+}
+
+static void log_file(fuse_req_t req, int inode_fd, int flags) {
+    char full_path[PATH_MAX];
+    bzero(full_path, PATH_MAX);
+    f3_get_full_path(inode_fd, full_path);
+
+    char buf[PATH_MAX];
+    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path, flags);
+    auto res = write(fs.file_logger_fd, buf, len);
+    if (res < 0) {
+        perror("write");
+    }
+    F3_LOG("fd: %d\n", fs.file_logger_fd);
+}
+
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
     (void)userdata;
     if (conn->capable & FUSE_CAP_EXPORT_SUPPORT)
@@ -1340,7 +1369,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         fi->fh = id_fd;
         close(fd);
 
-        if (fs.file_logger_fd > 0 && inode.is_id) {
+        if (fs.file_logger_fd > 0) {
 	    log_file(req, id_fd, fi->flags);
         }
     }
@@ -1373,35 +1402,6 @@ static void sfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
     else
         res = fsync(fd);
     F3_REPLY_ERR(req, res == -1 ? errno : 0);
-}
-
-static std::string get_pod_uid(fuse_req_t req) {
-    auto *fuse_ctx = fuse_req_ctx(req);
-
-    auto ppid = pfs::procfs().get_task(fuse_ctx->pid).get_stat().ppid;
-    printf("ppid=%d\n", ppid);
-
-    std::string cgroup = pfs::procfs().get_task(fuse_ctx->pid).get_cgroups()[0].pathname;
-    auto start = cgroup.find("kubepods-besteffort-pod") + sizeof("kubepods-besteffort-pod") - 1;
-
-    std::string pod_uid = cgroup.substr(start, 35);
-    std::replace(pod_uid.begin(), pod_uid.end(), '_', '-');
-
-    return pod_uid;
-}
-
-static void log_file(fuse_req_t req, int inode_fd, int flags) {
-    char full_path[PATH_MAX];
-    bzero(full_path, PATH_MAX);
-    f3_get_full_path(inode_fd, full_path);
-
-    char buf[PATH_MAX];
-    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path, flags);
-    auto res = write(fs.file_logger_fd, buf, len);
-    if (res < 0) {
-        perror("write");
-    }
-    F3_LOG("fd: %d\n", fs.file_logger_fd);
 }
 
 static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
