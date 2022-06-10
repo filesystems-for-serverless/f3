@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: action-file-server-service
+spec:
+  selector:
+    app: action-file-server
+  type: NodePort
+  ports:
+  - protocol: TCP
+    port: 8787
+    targetPort: 8787
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: action-file-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: action-file-server
+  template:
+    metadata:
+      labels:
+        app: action-file-server
+    spec:
+      nodeName: node-1
+      restartPolicy: Always
+      containers:
+      - image: docker.io/alexmerenstein/f3-action-file-server:0.0.1
+        name: test
+        ports:
+        - containerPort: 8787
+        volumeMounts:
+        - mountPath: /log
+          name: log
+      volumes:
+      - name: log
+        hostPath:
+          path: /var/log/f3/action-file-log
+          type: DirectoryOrCreate
