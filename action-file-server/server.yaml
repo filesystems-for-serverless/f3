@@ -27,7 +27,7 @@ spec:
     spec:
       restartPolicy: Always
       containers:
-      - image: docker.io/alexmerenstein/f3-action-file-server:0.0.1
+      - image: docker.io/alexmerenstein/f3-action-file-server:0.0.2
         name: test
         ports:
         - containerPort: 8787

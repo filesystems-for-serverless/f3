@@ -82,6 +82,9 @@
 #include <thread>
 #include <iomanip>
 #include <algorithm>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 #include "pfs/procfs.hpp"
 
 using namespace std;
@@ -205,6 +208,7 @@ struct Fs {
     std::string pod_uuid;
     int server_fd;
     int file_logger_fd;
+    int file_logger_socket;
 };
 static Fs fs{};
 
@@ -412,6 +416,10 @@ static std::string get_pod_uid(fuse_req_t req) {
     std::string cgroup = pfs::procfs().get_task(fuse_ctx->pid).get_cgroups()[0].pathname;
     auto start = cgroup.find("kubepods-besteffort-pod") + sizeof("kubepods-besteffort-pod") - 1;
 
+    if (start+35 > cgroup.length()) {
+	    return "unknown pod uid";
+    }
+
     std::string pod_uid = cgroup.substr(start, 35);
     std::replace(pod_uid.begin(), pod_uid.end(), '_', '-');
 
@@ -424,12 +432,21 @@ static void log_file(fuse_req_t req, int inode_fd, int flags) {
     f3_get_full_path(inode_fd, full_path);
 
     char buf[PATH_MAX];
-    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path, flags);
-    auto res = write(fs.file_logger_fd, buf, len);
-    if (res < 0) {
-        perror("write");
+    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path+fs.idroot.length()-1, flags);
+
+    if (fs.file_logger_fd) {
+	    auto res = write(fs.file_logger_fd, buf, len);
+	    if (res < 0) {
+		perror("file write");
+	    }
     }
-    F3_LOG("fd: %d\n", fs.file_logger_fd);
+
+    if (fs.file_logger_socket) {
+	    auto res = write(fs.file_logger_socket, buf, len);
+	    if (res < 0) {
+		perror("socket write");
+	    }
+    }
 }
 
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
@@ -1369,7 +1386,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         fi->fh = id_fd;
         close(fd);
 
-        if (fs.file_logger_fd > 0) {
+        if (fs.file_logger_fd > 0 || fs.file_logger_socket > 0) {
 	    log_file(req, id_fd, fi->flags);
         }
     }
@@ -1410,7 +1427,7 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     //F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
 
     if (fs.file_logger_fd > 0 && inode.is_id) {
-	    log_file(req, inode.fd, fi->flags);
+	    log_file(req, inode.id_fd, fi->flags);
     }
 
     /* With writeback cache, kernel may send read requests even
@@ -1968,6 +1985,7 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         ("s,client-socket-path", "Path of Unix Domain Socket for connecting to download client", cxxopts::value<std::string>())
         ("server-socket-path", "Path of Unix Domain Socket for connecting to download server", cxxopts::value<std::string>())
         ("file-logger-path", "Path of file for logging what files a pod accesses", cxxopts::value<std::string>())
+        ("file-logger-addr", "Address of file for logging what files a pod accesses", cxxopts::value<std::string>())
         ("pod-uuid", "UUID of pod driver is running for", cxxopts::value<std::string>());
 
     // FIXME: Find a better way to limit the try clause to just
@@ -2016,6 +2034,7 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
     }
 
     fs.file_logger_fd = 0;
+    fs.file_logger_socket = 0;
     if (options.count("pod-uuid")) {
         fs.pod_uuid = options["pod-uuid"].as<std::string>();
 
@@ -2028,6 +2047,31 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
             perror("file-logger-path");
         }
 	F3_LOG("logger fd: %d\n", fs.file_logger_fd);
+
+        if (options.count("file-logger-addr")) {
+		std::string file_logger_addr = options["file-logger-addr"].as<std::string>();
+		struct sockaddr_in server;
+		struct hostent *hostinfo;
+
+		fs.file_logger_socket = socket(AF_INET, SOCK_STREAM, 0);
+		if (fs.file_logger_socket < 0) {
+			perror("socket");
+		}
+
+		hostinfo = gethostbyname(file_logger_addr.c_str());
+		if (hostinfo == NULL) {
+			fprintf(stderr, "Unknown host %s\n", file_logger_addr.c_str());
+		}
+
+		server.sin_family = AF_INET;
+		server.sin_port = htons(8787);
+		server.sin_addr = *(struct in_addr *)hostinfo->h_addr;
+
+		auto res = connect(fs.file_logger_socket, (struct sockaddr *)&server, sizeof(server));
+		if (res > 0) {
+			perror("connect");
+		}
+	}
     }
 
     fs.debug = options.count("debug") != 0;
