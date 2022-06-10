@@ -328,8 +328,8 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
         podUID := req.GetVolumeContext()["csi.storage.k8s.io/pod.uid"]
 
-        klog.Infof("Running", "/f3-fuse-driver " + " --debug " + " --nocache " + " --single " + " --nosplice " + " --address " + ns.Driver.nodeID+":9999 " + " --idroot " + idroot + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + " " + sourcedir + " " + workdir)
-        cmd := exec.Command("/f3-fuse-driver", "--debug", "--nocache", "--single", "--nosplice", "--address", ns.Driver.nodeID+":9999", "--idroot", idroot, "--client-socket-path", ns.Driver.clientSocketAddress, "--server-socket-path", ns.Driver.serverSocketAddress, "--pod-uuid", podUID[0:8], sourcedir, workdir)
+        klog.Infof("Running", "/f3-fuse-driver " + " --debug " + " --nocache " + " --single " + " --nosplice " + " --address " + ns.Driver.nodeID+":9999 " + " --idroot " + idroot + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + " --file-logger-addr action-file-server-service.default" + sourcedir + " " + workdir)
+        cmd := exec.Command("/f3-fuse-driver", "--debug", "--nocache", "--single", "--nosplice", "--address", ns.Driver.nodeID+":9999", "--idroot", idroot, "--client-socket-path", ns.Driver.clientSocketAddress, "--server-socket-path", ns.Driver.serverSocketAddress, "--pod-uuid", podUID[0:8], "--file-logger-addr", "action-file-server-service.default", sourcedir, workdir)
 
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
