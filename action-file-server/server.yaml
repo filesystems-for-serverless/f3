@@ -25,7 +25,6 @@ spec:
       labels:
         app: action-file-server
     spec:
-      nodeName: node-1
       restartPolicy: Always
       containers:
       - image: docker.io/alexmerenstein/f3-action-file-server:0.0.2
