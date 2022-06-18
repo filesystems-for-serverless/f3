@@ -71,6 +71,9 @@
 #include <pthread.h>
 #include <limits.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+
 // C++ includes
 #include <cstddef>
 #include <cstdio>
@@ -110,6 +113,8 @@ struct move_info {
 #define INODE(i) (i.is_id ? i.id_fd : i.fd)
 
 #define PRINT_TIME do { clock_gettime(CLOCK_MONOTONIC, &timespec_g); fprintf(stderr, "%d %d\n", __LINE__, timespec_g.tv_nsec); }
+
+#define BLKSIZE (4*1024*1024)
 
 struct timespec timespec_g;
 
@@ -520,6 +525,15 @@ static size_t f3_get_size_xattr(int fd) {
     return ret;
 }
 
+// Check if socket is still open
+// For each file that needs to be downloaded, we open a UDS to client.go
+// client.go closes this socket once the file is done being downloaded (i.e.,
+// server.go closes the connection to client.go)
+// still_open is used to check if the file is done being downloaded
+static int still_open(int fd) {
+    char buf[1];
+    return send(fd, buf, 0, MSG_NOSIGNAL) >= 0;
+}
 
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
@@ -536,13 +550,31 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     }
 
     if (inode.is_id) {
-        /*
-        auto xattr_size = f3_get_size_xattr(inode.fd);
-        if ((off_t)xattr_size > attr.st_size) {
-            attr.st_size = (off_t)xattr_size;
-        }*/
-        //attr.st_size = 20485760000;
-        //attr.st_size = 4194304;
+        struct stat stat;
+        auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+        if (res == -1) {
+		    F3_LOG("%s: !!!", __func__);
+        }
+        int timeout = 0;
+        off_t prev_size = 0;
+        int delay_us = 1e6;
+        while (stat.st_size < 4194304 && still_open(inode.client_fd)) {
+			F3_LOG("Still open! %d\n", stat.st_size);
+			usleep(delay_us);
+			res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+			if (res < 0) {
+				perror("stat");
+			}
+			if (stat.st_size == prev_size) {
+				timeout += delay_us;
+			} else {
+				timeout = 0;
+			}
+			prev_size = stat.st_size;
+        }
+        if (timeout >= 10*1e6) {
+			F3_LOG("%s: !!! timeout reached\n", __func__);
+        }
         if (inode.target_size == 0) {
             inode.target_size = f3_get_size_xattr(inode.fd);
         }
@@ -552,7 +584,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
             attr.st_size = inode.target_size;
         }
 
-        attr.st_blksize = 4194304;
+		attr.st_blksize = BLKSIZE;
     }
 
     //if ((long unsigned int)ino != 1)
@@ -649,6 +681,41 @@ static void sfs_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
     do_setattr(req, ino, attr, valid, fi);
 }
 
+
+static void start_download(Inode& inode) {
+    F3_LOG("Needs download %ld", inode.download_thread);
+    fflush(stderr);
+
+    // Skip if already downloading?
+    if (inode.download_thread == 0) {
+        char full_path[PATH_MAX];
+        bzero(full_path, PATH_MAX);
+        f3_get_full_path(inode.fd, full_path);
+        char *servers = (char *)malloc(500);
+        bzero(servers, 500);
+        f3_get_servers(inode.fd, servers, 500);
+
+        struct download_info *dl_info = (struct download_info *)malloc(sizeof(struct download_info));
+        dl_info->fd = inode.client_fd;
+        dl_info->path = strdup(full_path+fs.source.length());
+        dl_info->servers = strdup(servers);
+        dl_info->end_byte = 0;
+        dl_info->download_done = &inode.download_done;
+        auto ret = pthread_create(&inode.download_thread, NULL, download_file_thread, (void *)dl_info);
+        F3_LOG("%s: %s %d %ld %d\n", __func__, dl_info->path, dl_info->fd, inode.download_thread, ret);
+        if (ret < 0) {
+            perror("pthread_create?");
+        }
+
+        F3_LOG("%s: started download thread...? %ld\n", __func__, inode.download_thread);
+
+        inode.target_size = f3_get_size_xattr(inode.fd);
+        servers = strcat(servers, ",");
+        servers = strcat(servers, fs.address.c_str());
+        f3_update_servers(inode.fd, servers);
+        free(servers);
+    }
+}
 
 static int do_lookup(fuse_ino_t parent, const char *name,
                      fuse_entry_param *e) {
@@ -776,6 +843,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
                         if (inode.client_fd < 0) {
                             perror("setup_conn");
                         }
+			start_download(inode);
                     }
                 }
                 // XXX Don't need to mark as ID, since the FS file is what's marked and
@@ -802,7 +870,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         */
     }
 
-    if (inode.is_id) {
+    if (inode.is_id && S_ISREG(e->attr.st_mode)) {
         //F3_LOG("%s: replacing attr with ID attr", __func__);
         auto res = fstatat(inode.id_fd, "", &e->attr, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
         if (res == -1) {
@@ -823,7 +891,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
 
-        e->attr.st_blksize = 4194304;
+		e->attr.st_blksize = BLKSIZE;
     }
 
     return 0;
@@ -1446,59 +1514,6 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     if (fs.timeout && fi->flags & O_APPEND)
         fi->flags &= ~O_APPEND;
 
-    if (inode.needs_download) {
-        F3_LOG("Needs download %ld", inode.download_thread);
-        fflush(stderr);
-
-        // Skip if already downloading?
-        if (inode.download_thread == 0) {
-            
-            char full_path[PATH_MAX];
-            bzero(full_path, PATH_MAX);
-            f3_get_full_path(inode.fd, full_path);
-            //f3_get_filepath(inode.fd, rel_path, PATH_MAX);
-            char *servers = (char *)malloc(500);
-            bzero(servers, 500);
-            f3_get_servers(inode.fd, servers, 500);
-
-#if 0
-            char *sources = (char *)malloc(500);
-            bzero(sources, 500);
-            f3_get_sources(inode.fd, sources, 500);
-#endif
-
-            struct download_info *dl_info = (struct download_info *)malloc(sizeof(struct download_info));
-            dl_info->fd = inode.client_fd;
-            dl_info->path = strdup(full_path+fs.source.length());
-            dl_info->servers = strdup(servers);
-            //dl_info->sources = strdup(sources);
-            dl_info->end_byte = 0;
-            dl_info->download_done = &inode.download_done;
-            auto ret = pthread_create(&inode.download_thread, NULL, download_file_thread, (void *)dl_info);
-            F3_LOG("%s: %s %d %ld %d\n", __func__, dl_info->path, dl_info->fd, inode.download_thread, ret);
-            if (ret < 0) {
-                perror("pthread_create?");
-            }
-
-            F3_LOG("%s: started download thread...? %ld\n", __func__, inode.download_thread);
-            //PRINT_TIME
-
-            inode.target_size = f3_get_size_xattr(inode.fd);
-            servers = strcat(servers, ",");
-            servers = strcat(servers, fs.address.c_str());
-            f3_update_servers(inode.fd, servers);
-            free(servers);
-
-            //sources = strcat(sources, ",");
-            //f3_update_sources(inode.fd, sources);
-            //free(sources);
-            /*
-            auto ret = download_file(inode.client_fd, rel_path, servers, 0);
-            //inode.needs_download = false;
-            */
-        }
-    }
-
     /* Unfortunately we cannot use inode.fd, because this was opened
        with O_PATH (so it doesn't allow read/write access). */
     //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
@@ -1549,18 +1564,15 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     
     // Only do this if we're the writing client
     // Probably better to actually check if fd was open for writing
-// TODO
-#if 0
     if (!inode.needs_download) {
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
-        f3_get_filepath(inode.fd, rel_path, PATH_MAX);
-        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path);
-        if (send_fname_done(fs.server_fd, rel_path) < 0) {
+        f3_get_full_path(inode.id_fd, rel_path);
+        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length()-1);
+        if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()-1) < 0) {
             perror("send_fname_done");
         }
     }
-#endif
 
     inode.nopen--;
     close(fi->fh);
@@ -1605,87 +1617,41 @@ static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     (void) ino;
     Inode& inode = get_inode(ino);
 
-    F3_LOG("%s: %ld\n", __func__, (long unsigned)ino);
+    F3_LOG("%s: %ld offset: %d size: %d\n", __func__, (long unsigned)ino, off, size);
 
-    //lock_guard<mutex> g {inode.m};
-
-    /*
     struct stat stat;
     auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
-        F3_LOG("%s: !!!", __func__);
-    }*/
-    //F3_LOG("%s: %lu %ld %lu\n", __func__, size, off, pthread_self());
-    // Check current file size.  If off+size > current size, check with uds client
-    // to see if conn closed(?)
-    // If not, wait...
-    //if (inode.needs_download && !inode.download_done) {
-    struct stat stat;
-    auto ret = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
-    // target_size is the size we read on open from the xattr, which is set by the producer
-    // if our actual size (stat.st_size) is less than target_size, that means we must not have downloaded
-    // the whole file yet.  This is sort of akin to reading from a file whose write buffer hasn't been
-    // flushed yet, except since the download doesnt' start until the consumer opens the file it's like
-    // if the write buffer weren't flushed until the file was opened by a reader
-    // 
-    // Note that this won't really work for streaming: the size xattr only gets written by the producer
-    // when the file is closed, so if we're streaming that xattr will still be zero (or not set at all).
-    // In that case, we "fallback" to normal reading behavior: reads will just return EOF if we reach the
-    // end of what we've downloaded so far.  Use consumer.py or similar to handle that.
-    //
-    // XXX we need to skip this for non-id...
+	F3_LOG("%s: !!!", __func__);
+    }
     int timeout = 0;
     off_t prev_size = 0;
     int delay_us = 5;
-    //F3_LOG("%s: %ld %lu\n", __func__, stat.st_size, inode.target_size);
-    //while ((unsigned long)stat.st_size < inode.target_size && timeout > 0) {
-    // XXX why do we want (off + size) < inode.target_size ???
-    // ->>> If user just gives a "large enough" size, e.g. 4096, to read(2), then stat.st_size will always
-    // be < (off + size).
-    // But at the same time, we don't want to just always check if stat.st_size < inode.target_size, since
-    // if the file is large we may be reading just a chunk.  In which case we do want to compare stat.st_size
-    // to (off + size).
-    //
-    // SO:
-    // if (off + size) is > inode.target_size, we're reading till EOF: stat.st_size should == inode.target_size
-    // if (off + size) is < inode.target_size, we're reading just a section of the file: stat.st_size should == (off + size)
-    //while ((unsigned long)stat.st_size < (off + size) && (off + size) < inode.target_size && timeout < (10*1e6)) {
-    off_t target_size;
-    if ((off + size) >= inode.target_size)
-        target_size = inode.target_size;
-    else
-        target_size = off + size;
-    while (timeout < (10*1e6) && stat.st_size < target_size) {
-        F3_LOG("%s: waiting... %ld %lu %d %d\n", __func__, stat.st_size, inode.target_size, timeout, delay_us);
-        //sleep(1);
-        //usleep(500000);
-        usleep(delay_us);
-        ret = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
-        if (ret < 0) {
-            perror("stat");
-        }
-        if (stat.st_size == prev_size) {
-            timeout += delay_us;
-            delay_us *= 2;
-        } else {
-            timeout = 0;
-        }
-        prev_size = stat.st_size;
+
+    // Wait until...
+    // X 1. Reach timeout
+    // 2. We've downloaded enough to satisfy this read request
+    // 3. The file is done being downloaded
+    //while (timeout < (10*1e6) && stat.st_size <= (off+size) && still_open(inode.client_fd)) {
+    while (stat.st_size <= (off+size) && still_open(inode.client_fd)) {
+	usleep(delay_us);
+	res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+	if (res < 0) {
+	    perror("stat");
+	}
+	if (stat.st_size == prev_size) {
+	    timeout += delay_us;
+	    //delay_us *= 2;
+	} else {
+	    timeout = 0;
+	}
+	prev_size = stat.st_size;
     }
     if (timeout >= 10*1e6) {
-        F3_LOG("%s: !!! timeout reached\n", __func__);
+	F3_LOG("%s: !!! timeout (would have been) reached\n", __func__);
     }
-    F3_LOG("%s: done! %ld %lu %d\n", __func__, stat.st_size, inode.target_size, timeout);
-    /*
-    if (inode.needs_download && inode.bytes_downloaded < (off + size)) {
-        auto ret = download_file(fs.client_fd, inode.fname, inode.servers, off+size);
-        if (ret < 0)
-            perror("Download?");
-        else
-            inode.bytes_downloaded = ret;
-    }*/
-    //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d fd: %lu", __func__, inode.id_fd, inode.fd, inode.is_id, fi->fh);
-    //F3_LOG("%s: %lu %lu %lu", __func__, size, off, (unsigned long)time(NULL));
+
+    F3_LOG("%s: size: %d\n", __func__, size);
     do_read(req, size, off, fi);
 }
 
