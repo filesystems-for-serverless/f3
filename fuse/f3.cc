@@ -412,6 +412,7 @@ static int get_fs_id_fd(fuse_ino_t ino) {
     return fd;
 }
 
+#if 0
 static std::string get_pod_uid(fuse_req_t req) {
     auto *fuse_ctx = fuse_req_ctx(req);
 
@@ -430,8 +431,10 @@ static std::string get_pod_uid(fuse_req_t req) {
 
     return pod_uid;
 }
+#endif
 
 static void log_file(fuse_req_t req, int inode_fd, int flags) {
+#if 0
     char full_path[PATH_MAX];
     bzero(full_path, PATH_MAX);
     f3_get_full_path(inode_fd, full_path);
@@ -452,6 +455,7 @@ static void log_file(fuse_req_t req, int inode_fd, int flags) {
 		perror("socket write");
 	    }
     }
+#endif
 }
 
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
@@ -1568,8 +1572,9 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
         f3_get_full_path(inode.id_fd, rel_path);
-        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length()-1);
-        if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()-1) < 0) {
+        F3_LOG("%s %d\n", fs.idroot.c_str(), fs.idroot.length());
+        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length());
+        if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
             perror("send_fname_done");
         }
     }
