@@ -1,12 +1,15 @@
 package main
 
 import (
+    "strconv"
     "strings"
     "time"
 	"flag"
 	"bufio"
 	"encoding/binary"
 	"net"
+    "net/url"
+    "net/http"
 	"os"
 	"path"
 	"io"
@@ -22,6 +25,8 @@ const(
 var(
     writeComplete = make(map[string]bool)
     writeCompleteLock sync.RWMutex
+    fileLoggerAddress = ""
+    temp_dir = "./tempdir"
 )
 
 func main(){
@@ -30,18 +35,19 @@ func main(){
 	log.SetLevel(log.TraceLevel)
 	listen_add := flag.String("listen-address", "0.0.0.0", "string")
 	listen_port := flag.String("listen-port", "9999", "string")
-	temp_dir := flag.String("temp-dir", "./tempdir","string")
+	flag.StringVar(&temp_dir, "temp-dir", "./tempdir","string")
     socket_file := flag.String("socket-file", "/f3/fuse-server.sock", "string")
+    flag.StringVar(&fileLoggerAddress, "file-logger", "http://file-logger-service.default.svc.cluster.local:8788", "string")
 	flag.Parse()
 
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("HELLO")
 
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_add: "+ *listen_add)
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_port: "+ *listen_port)
-	log.WithFields(log.Fields{"thread": "server.main",}).Trace("temp_dir: "+ *temp_dir)
+	log.WithFields(log.Fields{"thread": "server.main",}).Trace("temp_dir: "+ temp_dir)
 
     go run_local_server(*socket_file)
-	run_remote_server(*listen_add, *listen_port, *temp_dir)
+	run_remote_server(*listen_add, *listen_port)
 }
 
 //This function establishes connection with the FUSE driver using a socket file
@@ -73,6 +79,23 @@ func run_local_server(socket_file string) {
     }
 }
 
+func sendToFileLogger(fname string) {
+    v := url.Values{}
+    v.Set("filename", fname)
+    v.Set("server", os.Getenv("NODE_ID"))
+    if f, err := os.Stat(path.Join(temp_dir, fname)); err != nil {
+        fmt.Printf("ERROR getting file size %v %v\n%v\n", fname, path.Join(temp_dir, fname), err.Error())
+        v.Set("size", strconv.Itoa(0))
+    } else {
+        v.Set("size", strconv.FormatInt(f.Size(), 10))
+    }
+    if resp, err := http.PostForm(fileLoggerAddress+"/addFile", v); err != nil {
+        fmt.Printf("ERROR sending to file logger %v %v\n%v\n", fileLoggerAddress, v, err.Error())
+    } else {
+        fmt.Printf("resp: %v\n", resp)
+    }
+}
+
 func fuseConnectionHandler(fuseConn net.Conn) {
     for {
         buffer, err := bufio.NewReader(fuseConn).ReadBytes('\n')
@@ -89,12 +112,15 @@ func fuseConnectionHandler(fuseConn net.Conn) {
             writeCompleteLock.Lock()
             writeComplete[message] = true
             writeCompleteLock.Unlock()
+            if len(fileLoggerAddress) > 0 {
+                go sendToFileLogger(message)
+            }
         }
     }
 }
 
 //listens at listen_address and listen_port, accepts and handles client connection
-func run_remote_server(listen_address string, listen_port string, temp_dir string){
+func run_remote_server(listen_address string, listen_port string) {
 	l, err := net.Listen(connType, listen_address+":"+listen_port);
 	if err != nil{
 		log.WithFields(log.Fields{"thread": "server.main",}).Fatal("Error listening: ", err.Error())
@@ -109,11 +135,11 @@ func run_remote_server(listen_address string, listen_port string, temp_dir strin
 			continue
 		}
 		log.WithFields(log.Fields{"thread": "server.main",}).Trace("Got connection from "+ conn.RemoteAddr().String())
-		go handleConnection(conn, temp_dir)
+		go handleConnection(conn)
 	}
 }
 
-func handleMove(oldpath, newpath, temp_dir string) error {
+func handleMove(oldpath, newpath string) error {
     full_old_path := path.Join(temp_dir, oldpath)
     full_new_path := path.Join(temp_dir, newpath)
 
@@ -129,7 +155,7 @@ func handleMove(oldpath, newpath, temp_dir string) error {
 
 //receives client's file request, checks if it is present and sends resp. ack to the client
 //if file is present, firstly sends the file size and then the file
-func handleConnection(conn net.Conn, temp_dir string){
+func handleConnection(conn net.Conn) {
 	buffer, err := bufio.NewReader(conn).ReadBytes('\n')
 	clientAddress := conn.RemoteAddr().String()
 	if err != nil {
@@ -142,7 +168,7 @@ func handleConnection(conn net.Conn, temp_dir string){
 
     if strings.HasPrefix(message, "move") {
         arr := strings.Split(message, ",")
-        if err := handleMove(arr[1], arr[2], temp_dir); err != nil {
+        if err := handleMove(arr[1], arr[2]); err != nil {
             binary.Write(conn, binary.LittleEndian, false)
         } else {
             binary.Write(conn, binary.LittleEndian, true)

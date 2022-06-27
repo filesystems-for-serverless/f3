@@ -64,7 +64,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: alexmerenstein/f3-csi:2.0.12
+          image: alexmerenstein/f3-csi:2.0.13
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -107,7 +107,7 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: client-uds
-          image: alexmerenstein/f3-transfer-client-server:2.0.4
+          image: alexmerenstein/f3-transfer-client-server:2.0.5
           imagePullPolicy: Always
           command: ["/app/client"]
           args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/", "-server-address", "$(NODE_ID):9999"]
@@ -124,11 +124,10 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: server-uds
-          image: alexmerenstein/f3-transfer-client-server:2.0.4
+          image: alexmerenstein/f3-transfer-client-server:2.0.5
           imagePullPolicy: Always
           command: ["/app/server"]
-          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/", "-socket-file", "/f3/fuse-server.sock"]
-            #args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/ramdisk", "-socket-file", "/f3/fuse-server.sock"]
+          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/", "-socket-file", "/f3/fuse-server.sock", "-file-logger", "http://file-logger-service.default.svc.cluster.local:8788"]
           ports:
             - containerPort: 9999
               #resources:
@@ -140,6 +139,11 @@ spec:
               mountPath: /mnt/
             - name: f3
               mountPath: /f3/
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
       terminationGracePeriodSeconds: 30
       volumes:
       - name: mnt-dir
