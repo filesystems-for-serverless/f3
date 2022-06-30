@@ -337,11 +337,11 @@ func fuseConnectionHandler(fuseConn net.Conn, tempDir string, set map[string]boo
             //if w, err := io.CopyBuffer(io.Discard, f.conn, buf); err != nil {
                 fmt.Println(err.Error())
             } else {
-                fmt.Printf("Read %v bytes\n", w)
+                fmt.Printf("read,%v,%v\n", w, start.Unix())
                 fmt.Fprintf(fuseConn, "A,%d\n", 0)
             }
             elapsed := time.Since(start).Seconds()
-            fmt.Printf("Took %v seconds (started at %v, now %v)", elapsed, start.Unix(), time.Now().Unix())
+            fmt.Printf("Took %v seconds (started at %v, now %v)\n", elapsed, start.Unix(), time.Now().Unix())
             fuseConn.Close()
             fmt.Printf("Closed conn\n");
             f.fd.Close()
