@@ -30,7 +30,6 @@ var(
 )
 
 func main(){
-    fmt.Printf("HELLO")
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetLevel(log.TraceLevel)
 	listen_add := flag.String("listen-address", "0.0.0.0", "string")
@@ -39,8 +38,6 @@ func main(){
     socket_file := flag.String("socket-file", "/f3/fuse-server.sock", "string")
     flag.StringVar(&fileLoggerAddress, "file-logger", "http://file-logger-service.default.svc.cluster.local:8788", "string")
 	flag.Parse()
-
-	log.WithFields(log.Fields{"thread": "server.main",}).Trace("HELLO")
 
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_add: "+ *listen_add)
 	log.WithFields(log.Fields{"thread": "server.main",}).Trace("listen_port: "+ *listen_port)
@@ -108,6 +105,9 @@ func fuseConnectionHandler(fuseConn net.Conn) {
         message := string(buffer[:len(buffer)-1])
         fmt.Printf("Got message %v\n", message)
         if _, exists := writeComplete[message]; !exists {
+            if string(message[0]) != "/" {
+                message = "/"+message
+            }
             fmt.Printf("Adding %v to map\n%v\n", message, []byte(message))
             writeCompleteLock.Lock()
             writeComplete[message] = true
