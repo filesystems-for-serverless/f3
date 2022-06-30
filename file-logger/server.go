@@ -6,6 +6,7 @@ import (
     "fmt"
     "sort"
     "strings"
+    "sync"
     "strconv"
     "net/url"
     "net/http"
@@ -29,6 +30,7 @@ func contains(s []string, e string) bool {
 
 var fileNodeMap = make(map[string]FileInfo)
 var saveFile string
+var mapLock sync.RWMutex
 
 func preferredNodes(w http.ResponseWriter, req *http.Request) {
     var err error
@@ -69,6 +71,7 @@ func preferredNodes(w http.ResponseWriter, req *http.Request) {
     fmt.Printf("fs: %v\nminSize: %v\n", fs, minSizeInt)
 
     nodeScores := make(map[string]int)
+    mapLock.RLock()
     for _, f := range fs {
         if finfo, found := fileNodeMap[f]; found {
             for _, n := range finfo.Nodes {
@@ -79,6 +82,7 @@ func preferredNodes(w http.ResponseWriter, req *http.Request) {
             }
         }
     }
+    mapLock.RUnlock()
 
     res := make([]string, 0, len(nodeScores))
     for n := range nodeScores {
@@ -121,6 +125,8 @@ func addFile(w http.ResponseWriter, req *http.Request) {
         sizeInt = 0
     }
 
+    mapLock.Lock()
+    defer mapLock.Unlock()
     fmt.Printf("map: %v\nin map? %v\n", fileNodeMap, fileNodeMap[fname])
     if finfo, found := fileNodeMap[fname]; !found {
         fmt.Printf("New fname entry\n")
@@ -166,6 +172,8 @@ func loadSavedData() {
     }
     defer f.Close()
 
+    mapLock.Lock()
+    defer mapLock.Unlock()
     decoder := json.NewDecoder(f)
     decoder.Decode(&fileNodeMap)
 
