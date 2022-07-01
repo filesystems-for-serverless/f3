@@ -31,6 +31,7 @@ func contains(s []string, e string) bool {
 var fileNodeMap = make(map[string]FileInfo)
 var saveFile string
 var mapLock sync.RWMutex
+var persist bool
 
 func preferredNodes(w http.ResponseWriter, req *http.Request) {
     var err error
@@ -133,7 +134,9 @@ func addFile(w http.ResponseWriter, req *http.Request) {
         finfo = FileInfo{make([]string, 0), 0}
         finfo.Nodes = append(finfo.Nodes, server)
         finfo.Size = sizeInt
-        fileNodeMap[fname] = finfo
+        if persist {
+            fileNodeMap[fname] = finfo
+        }
     } else {
         fmt.Printf("Adding to existing fname entry\n")
         if !contains(finfo.Nodes, server) {
@@ -145,7 +148,9 @@ func addFile(w http.ResponseWriter, req *http.Request) {
                 finfo.Size = sizeInt
             }
         }
-        fileNodeMap[fname] = finfo
+        if persist {
+            fileNodeMap[fname] = finfo
+        }
     }
 
     fmt.Println(fileNodeMap)
@@ -183,12 +188,17 @@ func loadSavedData() {
 func main() {
 	listenPort := flag.String("listen-port", "9999", "string")
 	flag.StringVar(&saveFile, "save-file", "/tmp/node-file-data", "string")
+	flag.BoolVar(&persist, "persist", true, "disable for testing")
     flag.Parse()
 
-    loadSavedData()
+    if persist {
+        loadSavedData()
+    }
 
     http.HandleFunc("/addFile", addFile)
     http.HandleFunc("/preferredNodes", preferredNodes)
 
-    http.ListenAndServe(":"+*listenPort, nil)
+    if err := http.ListenAndServe(":"+*listenPort, nil); err != nil {
+        fmt.Printf("error ListenAndServe %v\n", err.Error())
+    }
 }
