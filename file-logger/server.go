@@ -32,6 +32,7 @@ var fileNodeMap = make(map[string]FileInfo)
 var saveFile string
 var mapLock sync.RWMutex
 var persist bool
+var debug bool
 
 func preferredNodes(w http.ResponseWriter, req *http.Request) {
     var err error
@@ -84,6 +85,7 @@ func preferredNodes(w http.ResponseWriter, req *http.Request) {
         }
     }
     mapLock.RUnlock()
+    fmt.Printf("node scores: %v\n", nodeScores)
 
     res := make([]string, 0, len(nodeScores))
     for n := range nodeScores {
@@ -128,7 +130,9 @@ func addFile(w http.ResponseWriter, req *http.Request) {
 
     mapLock.Lock()
     defer mapLock.Unlock()
-    fmt.Printf("map: %v\nin map? %v\n", fileNodeMap, fileNodeMap[fname])
+    if debug {
+        fmt.Printf("map: %v\nin map? %v\n", fileNodeMap, fileNodeMap[fname])
+    }
     if finfo, found := fileNodeMap[fname]; !found {
         fmt.Printf("New fname entry\n")
         finfo = FileInfo{make([]string, 0), 0}
@@ -153,7 +157,9 @@ func addFile(w http.ResponseWriter, req *http.Request) {
         }
     }
 
-    fmt.Println(fileNodeMap)
+    if debug {
+        fmt.Println(fileNodeMap)
+    }
     fmt.Fprintf(w, "ok\n")
 
     f, err := os.OpenFile(saveFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -189,6 +195,7 @@ func main() {
 	listenPort := flag.String("listen-port", "9999", "string")
 	flag.StringVar(&saveFile, "save-file", "/tmp/node-file-data", "string")
 	flag.BoolVar(&persist, "persist", true, "disable for testing")
+	flag.BoolVar(&debug, "debug", false, "debug output")
     flag.Parse()
 
     if persist {
