@@ -561,9 +561,9 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         }
         int timeout = 0;
         off_t prev_size = 0;
-        int delay_us = 1e6;
+        int delay_us = 50;
         while (stat.st_size < 4194304 && still_open(inode.client_fd)) {
-			F3_LOG("Still open! %d\n", stat.st_size);
+			F3_LOG("Still open! %d %d\n", stat.st_size, delay_us);
 			usleep(delay_us);
 			res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
 			if (res < 0) {
@@ -575,6 +575,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 				timeout = 0;
 			}
 			prev_size = stat.st_size;
+            delay_us *= 2;
         }
         if (timeout >= 10*1e6) {
 			F3_LOG("%s: !!! timeout reached\n", __func__);
