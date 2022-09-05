@@ -75,6 +75,9 @@ func preferredNodes(w http.ResponseWriter, req *http.Request) {
     nodeScores := make(map[string]int)
     mapLock.RLock()
     for _, f := range fs {
+        if strings.HasPrefix(f, "//") {
+            f = strings.Replace(f, "//", "/", 1)
+        }
         if finfo, found := fileNodeMap[f]; found {
             for _, n := range finfo.Nodes {
                 if _, nodeFound := nodeScores[n]; !nodeFound {
