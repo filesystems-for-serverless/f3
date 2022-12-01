@@ -12,8 +12,8 @@ requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 # kc get secret owdev-whisk.auth -oyaml -nopenwhisk, this is the guest one
 # (maybe it's the same everywhere??)
 OW_AUTH='MjNiYzQ2YjEtNzFmNi00ZWQ1LThjNTQtODE2YWE0ZjhjNTAyOjEyM3pPM3haQ0xyTU42djJCS0sxZFhZRnBYbFBrY2NPRnFtMTJDZEFzTWdSVTRWck5aOWx5R1ZDR3VNREdJd1A='
-OW_SERVER='130.245.126.249:31001'
-OW_ACTION='cmd2'
+OW_SERVER='192.168.190.108'
+OW_ACTION='cmd'
 OW_BLOCKING_ACTION=True
 OW_GET_RESULT=True
 OW_PARAMS = {'blocking': OW_BLOCKING_ACTION, 'result': OW_GET_RESULT}
@@ -40,40 +40,62 @@ def wait_on_activation(activation_url, activation_id):
     print('TIMEOUT REACHED')
     assert False
 
+"""
+def get_node_name(activation_id):
+    pods = v1.list_namespaced_pod('openwhisk', watch=False)
+    for p in pods.items:
+        if p.metadata.labels != None and 'user-action-pod' in p.metadata.labels:
+            name = p.metadata.name
+            log = v1.read_namespaced_pod_log(name, namespace='openwhisk')
+            if activation_id in log:
+                return p.spec.node_name
+
+    return 'not found'
+"""
+
 def main(args):
     OW_ACTION_URL=f'https://{args.ow_server}/api/v1/namespaces/_/actions/{args.ow_action}'
     OW_ACTIVATION_URL=f'https://{args.ow_server}/api/v1/namespaces/_/activations/'
 
     cmd = ' '.join(args.cmd)
-    data = {'command': cmd, 'f3SeqId': args.vol_list, 'mountPath': args.mount_path_list, 'f3Depth': str(0), 'logging-dir': args.logging_dir}
+    #data = {'command': cmd, 'f3SeqId': args.vol_list, 'mountPath': args.mount_path_list, 'f3Depth': str(0), 'logging-dir': args.logging_dir, 'dockerImage': "", 'runtimeClass': args.runtime_class}
+    data = {'command': cmd, 'f3SeqId': args.vol_list, 'mountPath': args.mount_path_list, 'f3Depth': str(0), 'logging-dir': args.logging_dir, 'dockerImage': args.container_image, 'runtimeClass': args.runtime_class}
 
     r = requests.post(OW_ACTION_URL, params=OW_PARAMS, json=data, headers=OW_HEADERS, verify=False)
+    r_json = json.loads(r.text.replace('\n', '\\n'))
     if r.status_code == 202:
-        r_json = json.loads(r.text.replace('\n', '\\n'))
+        #r_json = json.loads(r.text.replace('\n', '\\n'))
         resp = wait_on_activation(OW_ACTIVATION_URL, r_json['activationId'])
         r_json = json.loads(resp)
         if 'stderr' in r_json["response"]["result"]:
             print(f'stderr:\n{r_json["response"]["result"]["stderr"]}')
         if 'stdout' in r_json["response"]["result"]:
             print(f'stdout:\n{r_json["response"]["result"]["stdout"]}')
+        if 'nodename' in r_json["response"]["result"]:
+            print('NODENAME', r_json['response']['result']['nodename'])
     else:
         try:
             print(f'Status code: {r.status_code}')
-            r_json = json.loads(r.text.replace('\n', '\\n'))
+            #r_json = json.loads(r.text.replace('\n', '\\n'))
             if 'metadata' in r_json:
                 del r_json['metadata']['params']
                 print(f'metadata:\n{r_json["metadata"]}')
             print(f'stderr:\n{r_json["stderr"]}')
             print(f'stdout:\n{r_json["stdout"]}')
+            print(f'NODENAME,{r_json["nodename"]}')
         except Exception as e:
             print(r.text)
             print(e)
+
+    #print(f'node-name,{get_node_name(r_json["activationId"])}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ow-action', required=False, default=OW_ACTION)
     parser.add_argument('--ow-server', required=False, default=OW_SERVER)
     parser.add_argument('--vol-list', required=False, default=F3_SEQ_ID)
+    parser.add_argument('--runtime-class', required=False, default="")
+    parser.add_argument('--container-image', required=False, default="")
     parser.add_argument('--mount-path-list', required=False, default=MOUNT_PATH)
     parser.add_argument('--logging-dir', required=False, default='')
     parser.add_argument('cmd', nargs=argparse.REMAINDER)
