@@ -200,7 +200,7 @@ metadata:
   name: f3-pod-watcher
 rules:
 - apiGroups: [""] # "" indicates the core API group
-  resources: ["pods", "persistentvolumeclaims"]
+  resources: ["pods", "persistentvolumeclaims", "persistentvolumes"]
   verbs: ["get", "watch", "list", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
