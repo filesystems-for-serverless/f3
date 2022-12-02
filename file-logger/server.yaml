@@ -27,9 +27,9 @@ spec:
     spec:
       restartPolicy: Always
       containers:
-      - image: docker.io/alexmerenstein/f3-file-logger:0.0.2
+      - image: docker.io/alexmerenstein/f3-file-logger:0.0.4
         #command: ["/server", "-listen-port", "8788", "-save-file", "/log/save-file"]
-        command: ["tail", "-f", "/dev/null"]
+        command: ["bash", "-c", "/server -listen-port 8788 -save-file /log/save-file; tail -f /dev/null"]
         name: test
         ports:
         - containerPort: 8788
