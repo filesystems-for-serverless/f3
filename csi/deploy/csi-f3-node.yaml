@@ -15,7 +15,7 @@ spec:
       labels:
         app: csi-f3-node
     spec:
-      #hostNetwork: true  # original f3 connection would be broken without hostNetwork setting
+      hostNetwork: true  # original f3 connection would be broken without hostNetwork setting
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/os: linux
@@ -64,7 +64,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: alexmerenstein/f3-csi:2.0.20
+          image: alexmerenstein/f3-csi:2.0.22
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -107,10 +107,10 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: client-uds
-          image: alexmerenstein/f3-transfer-client-server:2.0.8
+          image: alexmerenstein/f3-transfer-client-server:2.0.9
           imagePullPolicy: Always
           command: ["/app/client"]
-          args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/local-cache/tempdir/", "-server-address", "$(NODE_ID):9999"]
+          args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/ram/f3-dir/", "-server-address", "$(NODE_ID):9999"]
             #args: ["-socket-file", "/f3/fuse-client.sock", "-temp-dir", "/mnt/ramdisk"]
             #resources:
             #requests:
@@ -124,10 +124,10 @@ spec:
             - name: token
               mountPath: /var/run/secrets/kubernetes.io/podwatcher
         - name: server-uds
-          image: alexmerenstein/f3-transfer-client-server:2.0.8
+          image: alexmerenstein/f3-transfer-client-server:2.0.9
           imagePullPolicy: Always
           command: ["/app/server"]
-          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/local-cache/tempdir/", "-socket-file", "/f3/fuse-server.sock", "-file-logger", "http://file-logger-service.default.svc.cluster.local:8788"]
+          args: ["-listen-address", "0.0.0.0", "-listen-port", "9999", "-temp-dir","/mnt/ram/f3-dir/", "-socket-file", "/f3/fuse-server.sock", "-file-logger", "http://file-logger-service.default.svc.cluster.local:8788"]
           ports:
             - containerPort: 9999
               #resources:
