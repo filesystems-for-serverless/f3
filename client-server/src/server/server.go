@@ -77,6 +77,7 @@ func run_local_server(socket_file string) {
 }
 
 func sendToFileLogger(fname string) {
+	fmt.Printf("Sending file done to logger %v\n", fname)
     v := url.Values{}
     v.Set("filename", fname)
     v.Set("server", os.Getenv("NODE_ID"))
@@ -86,6 +87,19 @@ func sendToFileLogger(fname string) {
     } else {
         v.Set("size", strconv.FormatInt(f.Size(), 10))
     }
+    if resp, err := http.PostForm(fileLoggerAddress+"/addFile", v); err != nil {
+        fmt.Printf("ERROR sending to file logger %v %v\n%v\n", fileLoggerAddress, v, err.Error())
+    } else {
+        fmt.Printf("resp: %v\n", resp)
+    }
+}
+
+func sendInitialToFileLogger(fname string) {
+	fmt.Printf("Sending initial file to logger %v\n", fname)
+    v := url.Values{}
+    v.Set("filename", fname)
+    v.Set("server", os.Getenv("NODE_ID"))
+    v.Set("size", strconv.Itoa(1000))
     if resp, err := http.PostForm(fileLoggerAddress+"/addFile", v); err != nil {
         fmt.Printf("ERROR sending to file logger %v %v\n%v\n", fileLoggerAddress, v, err.Error())
     } else {
@@ -104,18 +118,22 @@ func fuseConnectionHandler(fuseConn net.Conn) {
         }
         message := string(buffer[:len(buffer)-1])
         fmt.Printf("Got message %v\n", message)
-        if _, exists := writeComplete[message]; !exists {
-            if string(message[0]) != "/" {
-                message = "/"+message
-            }
-            fmt.Printf("Adding %v to map\n%v\n", message, []byte(message))
-            writeCompleteLock.Lock()
-            writeComplete[message] = true
-            writeCompleteLock.Unlock()
-            if len(fileLoggerAddress) > 0 {
-                go sendToFileLogger(message)
-            }
-        }
+	if strings.HasPrefix(message, "XXX") {
+		go sendInitialToFileLogger(message[3:])
+	} else {
+		if _, exists := writeComplete[message]; !exists {
+		    if string(message[0]) != "/" {
+			message = "/"+message
+		    }
+		    fmt.Printf("Adding %v to map\n%v\n", message, []byte(message))
+		    writeCompleteLock.Lock()
+		    writeComplete[message] = true
+		    writeCompleteLock.Unlock()
+		    if len(fileLoggerAddress) > 0 {
+			go sendToFileLogger(message)
+		    }
+		}
+	}
     }
 }
 

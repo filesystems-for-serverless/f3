@@ -124,6 +124,7 @@ std::string client_uds_path;
 void *download_file_thread(void *ptr);
 void *move_file_thread(void *ptr);
 int send_fname_done(int fd, char *fname);
+int send_fname_created(int fd, char *fname);
 
 /* We are re-using pointers to our `struct sfs_inode` and `struct
    sfs_dirp` elements as inodes and file handles. This means that we
@@ -1461,6 +1462,13 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 
         if (fs.file_logger_fd > 0 || fs.file_logger_socket > 0) {
 	    log_file(req, id_fd, fi->flags);
+        }
+
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_full_path(id_fd, rel_path);
+        if (send_fname_created(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
+            perror("send_fname_done create");
         }
     }
 

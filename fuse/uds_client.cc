@@ -50,6 +50,21 @@ int setup_conn(const char *uds_path) {
     return fd;
 }
 
+int send_fname_created(int fd, char *fname) {
+    int ret;
+    char buf[PATH_MAX];
+    int len = snprintf(buf, sizeof(buf), "XXX%s\n", fname);
+    printf("Sending fname created %s\n", buf);
+    ret = write(fd, buf, len);
+    if (ret < 0) {
+        perror("write");
+        return -1;
+    }
+    printf("Wrote %d bytes\n", ret);
+
+    return 0;
+}
+
 int send_fname_done(int fd, char *fname) {
     int ret;
     char buf[PATH_MAX];
