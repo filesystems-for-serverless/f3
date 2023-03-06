@@ -182,6 +182,8 @@ struct Inode {
     pthread_t download_thread;
     size_t size{0};
     size_t target_size{0};
+    int open_for_writing;
+    std::thread::id writer_thread;
 
     // Delete copy constructor and assignments. We could implement
     // move if we need it.
@@ -218,6 +220,8 @@ struct Fs {
 };
 static Fs fs{};
 
+
+std::vector<std::string> writefiles;
 
 #define FUSE_BUF_COPY_FLAGS                      \
         (fs.nosplice ?                           \
@@ -540,6 +544,35 @@ static int still_open(int fd) {
     return send(fd, buf, 0, MSG_NOSIGNAL) >= 0;
 }
 
+
+static int local_write(char *rel_path) {
+    std::ifstream input("/tmp/writelist");
+    std::string line;
+    int open_found = 0;
+    while (std::getline(input, line)) {
+	if (strcmp(line.c_str(), rel_path) == 0) {
+		return 1;
+	}
+    }
+    return 0;
+}
+
+static int done_writing(char *rel_path) {
+    std::ifstream donelist("/tmp/donelist");
+    std::string line;
+    int close_found = 0;
+    while (std::getline(donelist, line)) {
+	if (strcmp(line.c_str(), rel_path) == 0) {
+		return 1;
+	}
+    }
+    return 0;
+}
+
+static int iamwriter(char *rel_path) {
+    return std::count(writefiles.begin(), writefiles.end(), rel_path) > 0;
+}
+
 static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     (void)fi;
     Inode& inode = get_inode(ino);
@@ -562,9 +595,12 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         }
         int timeout = 0;
         off_t prev_size = 0;
-        int delay_us = 50;
-        while (stat.st_size < 4194304 && still_open(inode.client_fd)) {
-			F3_LOG("Still open! %d %d\n", stat.st_size, delay_us);
+        int delay_us = 500;
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_full_path(inode.id_fd, rel_path);
+        while (stat.st_size <= 419430 && (still_open(inode.client_fd) || (local_write(rel_path) && !done_writing(rel_path) && !iamwriter(rel_path)))) {
+			F3_LOG("Still open! %d %d %d %p\n", stat.st_size, delay_us, inode.nopen, std::this_thread::get_id());
 			usleep(delay_us);
 			res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
 			if (res < 0) {
@@ -576,7 +612,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 				timeout = 0;
 			}
 			prev_size = stat.st_size;
-            delay_us *= 2;
+            delay_us *= 1.1;
         }
         if (timeout >= 10*1e6) {
 			F3_LOG("%s: !!! timeout reached\n", __func__);
@@ -1486,6 +1522,19 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     Inode& inode = get_inode(e.ino);
     lock_guard<mutex> g {inode.m};
     inode.nopen++;
+
+    F3_LOG("Open for writing??? %p\n", std::this_thread::get_id());
+    inode.open_for_writing = 1;
+    inode.writer_thread = std::this_thread::get_id();
+
+    std::ofstream outfile;
+    char rel_path[PATH_MAX];
+    bzero(rel_path, PATH_MAX);
+    f3_get_full_path(inode.id_fd, rel_path);
+    outfile.open("/tmp/writelist", std::ios_base::app); // append instead of overwrite
+    outfile << rel_path << endl;
+    writefiles.push_back(rel_path);
+
     fuse_reply_create(req, &e, fi);
 }
 
@@ -1509,6 +1558,22 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 
     if (fs.file_logger_fd > 0 && inode.is_id) {
 	    log_file(req, inode.id_fd, fi->flags);
+    }
+
+    if (inode.is_id && (fi->flags & O_RDWR || fi->flags & O_WRONLY)) {
+        F3_LOG("Open for writing! %p\n", std::this_thread::get_id());
+        inode.open_for_writing = 1;
+        inode.writer_thread = std::this_thread::get_id();
+
+        std::ofstream outfile;
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_full_path(inode.id_fd, rel_path);
+        outfile.open("/tmp/writelist", std::ios_base::app); // append instead of overwrite
+        outfile << rel_path << endl;
+	writefiles.push_back(rel_path);
+    } else {
+	inode.open_for_writing = 0;
     }
 
     /* With writeback cache, kernel may send read requests even
@@ -1567,6 +1632,19 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         F3_LOG("!!!");
     }*/
 
+    F3_LOG("%p %d\n", fi, ino);
+    if (inode.open_for_writing && inode.writer_thread == std::this_thread::get_id()) {
+        inode.open_for_writing = 0;
+        F3_LOG("%s: writer is closing file\n", __func__);
+
+        std::ofstream outfile;
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_full_path(inode.id_fd, rel_path);
+        outfile.open("/tmp/donelist", std::ios_base::app); // append instead of overwrite
+        outfile << rel_path << endl;
+    }
+
     
     auto fl = fcntl(fi->fh, F_GETFL);
     F3_LOG("%s: %d %x", __func__, fl, fl);
@@ -1581,6 +1659,10 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
         f3_get_full_path(inode.id_fd, rel_path);
+        std::ofstream outfile;
+        outfile.open("/tmp/donelist", std::ios_base::app); // append instead of overwrite
+        outfile << rel_path << endl;
+
         F3_LOG("%s %d\n", fs.idroot.c_str(), fs.idroot.length());
         F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length());
         if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
@@ -1631,7 +1713,7 @@ static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     (void) ino;
     Inode& inode = get_inode(ino);
 
-    F3_LOG("%s: %ld offset: %d size: %d\n", __func__, (long unsigned)ino, off, size);
+    F3_LOG("%s: %ld offset: %d size: %d %d %d %d\n", __func__, (long unsigned)ino, off, size, fi->fh, inode.id_fd, inode.is_id);
 
     struct stat stat;
     auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
@@ -1642,12 +1724,21 @@ static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     off_t prev_size = 0;
     int delay_us = 5;
 
+        char rel_path[PATH_MAX];
+        bzero(rel_path, PATH_MAX);
+        f3_get_full_path(inode.id_fd, rel_path);
+
     // Wait until...
     // X 1. Reach timeout
     // 2. We've downloaded enough to satisfy this read request
     // 3. The file is done being downloaded
-    //while (timeout < (10*1e6) && stat.st_size <= (off+size) && still_open(inode.client_fd)) {
-    while (stat.st_size <= (off+size) && still_open(inode.client_fd)) {
+    int printwait = 0;
+    while (stat.st_size <= (off+size) && (still_open(inode.client_fd) || (local_write(rel_path) && !done_writing(rel_path)))) {
+	if (printwait == 0) {
+		printwait = 1;
+		F3_LOG("begin wait\n");
+	}
+	F3_LOG("%s: still open? %d %d %d %d %d\n", __func__, stat.st_size, off+size, inode.nopen, inode.is_id, fi->fh);
 	usleep(delay_us);
 	res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
 	if (res < 0) {
@@ -1655,14 +1746,18 @@ static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 	}
 	if (stat.st_size == prev_size) {
 	    timeout += delay_us;
-	    //delay_us *= 2;
+	    delay_us *= 2;
 	} else {
+	    delay_us = 5;
 	    timeout = 0;
 	}
 	prev_size = stat.st_size;
     }
     if (timeout >= 10*1e6) {
 	F3_LOG("%s: !!! timeout (would have been) reached\n", __func__);
+    }
+    if (printwait > 0) {
+	    F3_LOG("end wait\n");
     }
 
     F3_LOG("%s: size: %d\n", __func__, size);
@@ -1678,7 +1773,7 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
     out_buf.buf[0].fd = fi->fh;
     out_buf.buf[0].pos = off;
 
-    //F3_LOG("%s: %lu", __func__, fi->fh);
+    F3_LOG("%s: %lu %d %d %d %d %p\n", __func__, fi->fh, inode.id_fd, size, off, size+off, std::this_thread::get_id());
 
     auto res = fuse_buf_copy(&out_buf, in_buf, FUSE_BUF_COPY_FLAGS);
     if (res < 0)
