@@ -88,7 +88,6 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-#include "pfs/procfs.hpp"
 
 using namespace std;
 
@@ -131,9 +130,9 @@ int send_fname_created(int fd, char *fname);
    must be able to store pointer a pointer in both a fuse_ino_t
    variable and a uint64_t variable (used for file handles). */
 static_assert(sizeof(fuse_ino_t) >= sizeof(void*),
-              "void* must fit into fuse_ino_t");
+        "void* must fit into fuse_ino_t");
 static_assert(sizeof(fuse_ino_t) >= sizeof(uint64_t),
-              "fuse_ino_t must be at least 64 bits");
+        "fuse_ino_t must be at least 64 bits");
 
 
 /* Forward declarations */
@@ -153,11 +152,11 @@ typedef std::pair<ino_t, dev_t> SrcId;
 // Define a hash function for SrcId
 namespace std {
     template<>
-    struct hash<SrcId> {
-        size_t operator()(const SrcId& id) const {
-            return hash<ino_t>{}(id.first) ^ hash<dev_t>{}(id.second);
-        }
-    };
+        struct hash<SrcId> {
+            size_t operator()(const SrcId& id) const {
+                return hash<ino_t>{}(id.first) ^ hash<dev_t>{}(id.second);
+            }
+        };
 }
 
 // Maps files in the source directory tree to inodes
@@ -223,10 +222,10 @@ static Fs fs{};
 
 std::vector<std::string> writefiles;
 
-#define FUSE_BUF_COPY_FLAGS                      \
-        (fs.nosplice ?                           \
-            FUSE_BUF_NO_SPLICE :                 \
-            static_cast<fuse_buf_copy_flags>(0))
+#define FUSE_BUF_COPY_FLAGS               \
+    (fs.nosplice ?                        \
+     FUSE_BUF_NO_SPLICE :                 \
+     static_cast<fuse_buf_copy_flags>(0))
 
 
 static Inode& get_inode(fuse_ino_t ino) {
@@ -417,52 +416,6 @@ static int get_fs_id_fd(fuse_ino_t ino) {
     return fd;
 }
 
-#if 0
-static std::string get_pod_uid(fuse_req_t req) {
-    auto *fuse_ctx = fuse_req_ctx(req);
-
-    auto ppid = pfs::procfs().get_task(fuse_ctx->pid).get_stat().ppid;
-    printf("ppid=%d\n", ppid);
-
-    std::string cgroup = pfs::procfs().get_task(fuse_ctx->pid).get_cgroups()[0].pathname;
-    auto start = cgroup.find("kubepods-besteffort-pod") + sizeof("kubepods-besteffort-pod") - 1;
-
-    if (start+35 > cgroup.length()) {
-	    return "unknown pod uid";
-    }
-
-    std::string pod_uid = cgroup.substr(start, 35);
-    std::replace(pod_uid.begin(), pod_uid.end(), '_', '-');
-
-    return pod_uid;
-}
-#endif
-
-static void log_file(fuse_req_t req, int inode_fd, int flags) {
-#if 0
-    char full_path[PATH_MAX];
-    bzero(full_path, PATH_MAX);
-    f3_get_full_path(inode_fd, full_path);
-
-    char buf[PATH_MAX];
-    auto len = snprintf(buf, sizeof(buf), "{\"pod-uid\": \"%s\", \"path\": \"%s\", \"flags\": \"%o\"}\n", get_pod_uid(req).c_str(), full_path+fs.idroot.length()-1, flags);
-
-    if (fs.file_logger_fd) {
-	    auto res = write(fs.file_logger_fd, buf, len);
-	    if (res < 0) {
-		perror("file write");
-	    }
-    }
-
-    if (fs.file_logger_socket) {
-	    auto res = write(fs.file_logger_socket, buf, len);
-	    if (res < 0) {
-		perror("socket write");
-	    }
-    }
-#endif
-}
-
 static void sfs_init(void *userdata, fuse_conn_info *conn) {
     (void)userdata;
     if (conn->capable & FUSE_CAP_EXPORT_SUPPORT)
@@ -513,7 +466,6 @@ static void f3_update_size_xattr(int fd, size_t size) {
 static size_t f3_get_size_xattr(int fd) {
     size_t ret;
 
-    //PRINT_TIME
     F3_LOG("%s", __func__);
     auto newfd = f3_get_full_fd(fd, O_RDONLY);
     if (newfd == -1) {
@@ -548,11 +500,10 @@ static int still_open(int fd) {
 static int local_write(char *rel_path) {
     std::ifstream input("/tmp/writelist");
     std::string line;
-    int open_found = 0;
     while (std::getline(input, line)) {
-	if (strcmp(line.c_str(), rel_path) == 0) {
-		return 1;
-	}
+        if (strcmp(line.c_str(), rel_path) == 0) {
+            return 1;
+        }
     }
     return 0;
 }
@@ -560,11 +511,10 @@ static int local_write(char *rel_path) {
 static int done_writing(char *rel_path) {
     std::ifstream donelist("/tmp/donelist");
     std::string line;
-    int close_found = 0;
     while (std::getline(donelist, line)) {
-	if (strcmp(line.c_str(), rel_path) == 0) {
-		return 1;
-	}
+        if (strcmp(line.c_str(), rel_path) == 0) {
+            return 1;
+        }
     }
     return 0;
 }
@@ -581,7 +531,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 
     struct stat attr;
     auto res = fstatat(INODE(inode), "", &attr,
-                   AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+            AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
         F3_REPLY_ERR(req, errno);
         return;
@@ -591,7 +541,7 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         struct stat stat;
         auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
         if (res == -1) {
-		    F3_LOG("%s: !!!", __func__);
+            F3_LOG("%s: !!!", __func__);
         }
         int timeout = 0;
         off_t prev_size = 0;
@@ -600,22 +550,22 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         bzero(rel_path, PATH_MAX);
         f3_get_full_path(inode.id_fd, rel_path);
         while (stat.st_size <= 419430 && (still_open(inode.client_fd) || (local_write(rel_path) && !done_writing(rel_path) && !iamwriter(rel_path)))) {
-			F3_LOG("Still open! %d %d %d %p\n", stat.st_size, delay_us, inode.nopen, std::this_thread::get_id());
-			usleep(delay_us);
-			res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
-			if (res < 0) {
-				perror("stat");
-			}
-			if (stat.st_size == prev_size) {
-				timeout += delay_us;
-			} else {
-				timeout = 0;
-			}
-			prev_size = stat.st_size;
+            F3_LOG("Still open! %ld %d %lu\n", stat.st_size, delay_us, inode.nopen);
+            usleep(delay_us);
+            res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+            if (res < 0) {
+                perror("stat");
+            }
+            if (stat.st_size == prev_size) {
+                timeout += delay_us;
+            } else {
+                timeout = 0;
+            }
+            prev_size = stat.st_size;
             delay_us *= 1.1;
         }
         if (timeout >= 10*1e6) {
-			F3_LOG("%s: !!! timeout reached\n", __func__);
+            F3_LOG("%s: !!! timeout reached\n", __func__);
         }
         if (inode.target_size == 0) {
             inode.target_size = f3_get_size_xattr(inode.fd);
@@ -626,17 +576,15 @@ static void sfs_getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
             attr.st_size = inode.target_size;
         }
 
-		attr.st_blksize = BLKSIZE;
+        attr.st_blksize = BLKSIZE;
     }
 
-    //if ((long unsigned int)ino != 1)
-    //    F3_LOG("%s: size: %lu", __func__, attr.st_size);
     fuse_reply_attr(req, &attr, fs.timeout);
 }
 
 
 static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
-                       int valid, struct fuse_file_info* fi) {
+        int valid, struct fuse_file_info* fi) {
     Inode& inode = get_inode(ino);
     int ifd = INODE(inode);
     int res;
@@ -692,11 +640,11 @@ static void do_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
         if (fi)
             res = futimens(fi->fh, tv);
         else {
-// XXX build hack, this is set in config.h but we're not actually including that because
-// we don't set -DHAVE_CONFIG_H when we build f3.cc, since we just manually invoke g++
-// rather than use the libfuse build system.  Don't want to start including config.h now
-// in case one of the other things in there causes problems, so just manually set
-// HAVE_UTIMENSTAT here
+            // XXX build hack, this is set in config.h but we're not actually including that because
+            // we don't set -DHAVE_CONFIG_H when we build f3.cc, since we just manually invoke g++
+            // rather than use the libfuse build system.  Don't want to start including config.h now
+            // in case one of the other things in there causes problems, so just manually set
+            // HAVE_UTIMENSTAT here
 #define HAVE_UTIMENSAT
 #ifdef HAVE_UTIMENSAT
             char procname[64];
@@ -718,7 +666,7 @@ out_err:
 
 
 static void sfs_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr,
-                        int valid, fuse_file_info *fi) {
+        int valid, fuse_file_info *fi) {
     (void) ino;
     do_setattr(req, ino, attr, valid, fi);
 }
@@ -760,11 +708,11 @@ static void start_download(Inode& inode) {
 }
 
 static int do_lookup(fuse_ino_t parent, const char *name,
-                     fuse_entry_param *e) {
+        fuse_entry_param *e) {
     /*
-    if (fs.debug)
-        cerr << "DEBUG: lookup(): name=" << name
-             << ", parent=" << parent << endl;
+     if (fs.debug)
+       cerr << "DEBUG: lookup(): name=" << name
+       << ", parent=" << parent << endl;
     */
     memset(e, 0, sizeof(*e));
     e->attr_timeout = fs.timeout;
@@ -788,7 +736,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         return ENOTSUP;
     } else if (e->attr.st_ino == FUSE_ROOT_ID) {
         cerr << "ERROR: Source directory tree must not include inode "
-             << FUSE_ROOT_ID << endl;
+            << FUSE_ROOT_ID << endl;
         return EIO;
     }
 
@@ -807,18 +755,18 @@ static int do_lookup(fuse_ino_t parent, const char *name,
     if (inode.fd == -ENOENT) { // found unlinked inode
         if (fs.debug)
             cerr << "DEBUG: lookup(): inode " << e->attr.st_ino
-                 << " recycled; generation=" << inode.generation << endl;
-    /* fallthrough to new inode but keep existing inode.nlookup */
+                << " recycled; generation=" << inode.generation << endl;
+        /* fallthrough to new inode but keep existing inode.nlookup */
     }
 
     if (inode.fd > 0) { // found existing inode
         fs_lock.unlock();
         /*
-        if (fs.debug)
-            cerr << "DEBUG: lookup(): inode " << e->attr.st_ino
-                 << " (userspace) already known; fd = " << inode.fd
-                 << " " << (long unsigned int)inode_p << endl;
-        */
+           if (fs.debug)
+           cerr << "DEBUG: lookup(): inode " << e->attr.st_ino
+           << " (userspace) already known; fd = " << inode.fd
+           << " " << (long unsigned int)inode_p << endl;
+           */
         lock_guard<mutex> g {inode.m};
         inode.nlookup++;
         close(newfd);
@@ -871,11 +819,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
                     if (inode.is_id) {
                         F3_LOG("%s: inode: %p needs download: %d\n", __func__, &inode, inode.needs_download);
                         inode.needs_download = true;
-                        /*
-                        inode.fname = (char *)malloc(PATH_MAX);
-                        bzero(inode.fname, PATH_MAX);
-                        f3_get_filepath(inode.fd, inode.fname, PATH_MAX);
-                        */
+
                         inode.servers = (char *)malloc(500);
                         bzero(inode.servers, 500);
                         f3_get_servers(inode.fd, inode.servers, 500);
@@ -885,7 +829,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
                         if (inode.client_fd < 0) {
                             perror("setup_conn");
                         }
-			start_download(inode);
+                        start_download(inode);
                     }
                 }
                 // XXX Don't need to mark as ID, since the FS file is what's marked and
@@ -903,13 +847,6 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         F3_LOG("XXX %d %d\n", inode.fd, inode.id_fd);
 
         fs_lock.unlock();
-
-        /*
-        if (fs.debug)
-            cerr << "DEBUG: lookup(): created userspace inode " << e->attr.st_ino
-                 << "; fd = " << inode.fd << " " << inode.id_fd 
-                 << " " << (long unsigned int)inode_p << endl;
-        */
     }
 
     if (inode.is_id && S_ISREG(e->attr.st_mode)) {
@@ -933,7 +870,7 @@ static int do_lookup(fuse_ino_t parent, const char *name,
         inode.src_ino = e->attr.st_ino;
         inode.src_dev = e->attr.st_dev;
 
-		e->attr.st_blksize = BLKSIZE;
+        e->attr.st_blksize = BLKSIZE;
     }
 
     return 0;
@@ -961,8 +898,8 @@ static void sfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
 
 
 static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
-                              const char *name, mode_t mode, dev_t rdev,
-                              const char *link) {
+        const char *name, mode_t mode, dev_t rdev,
+        const char *link) {
     int res;
     Inode& inode_p = get_inode(parent);
     auto saverr = ENOMEM;
@@ -1017,25 +954,25 @@ out:
 
 
 static void sfs_mknod(fuse_req_t req, fuse_ino_t parent, const char *name,
-                      mode_t mode, dev_t rdev) {
+        mode_t mode, dev_t rdev) {
     mknod_symlink(req, parent, name, mode, rdev, nullptr);
 }
 
 
 static void sfs_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name,
-                      mode_t mode) {
+        mode_t mode) {
     mknod_symlink(req, parent, name, S_IFDIR | mode, 0, nullptr);
 }
 
 
 static void sfs_symlink(fuse_req_t req, const char *link, fuse_ino_t parent,
-                        const char *name) {
+        const char *name) {
     mknod_symlink(req, parent, name, S_IFLNK, 0, link);
 }
 
 
 static void sfs_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t parent,
-                     const char *name) {
+        const char *name) {
     Inode& inode = get_inode(ino);
     Inode& inode_p = get_inode(parent);
     fuse_entry_param e {};
@@ -1087,8 +1024,8 @@ static void sfs_rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
 }
 
 static void sfs_rename(fuse_req_t req, fuse_ino_t parent, const char *name,
-                       fuse_ino_t newparent, const char *newname,
-                       unsigned int flags) {
+        fuse_ino_t newparent, const char *newname,
+        unsigned int flags) {
     Inode& inode_p = get_inode(parent);
     Inode& inode_np = get_inode(newparent);
     if (flags) {
@@ -1207,7 +1144,7 @@ static void forget_one(fuse_ino_t ino, uint64_t n) {
 
     if(n > inode.nlookup) {
         cerr << "INTERNAL ERROR: Negative lookup count for inode "
-             << inode.src_ino << endl;
+            << inode.src_ino << endl;
         abort();
     }
     inode.nlookup -= n;
@@ -1220,8 +1157,8 @@ static void forget_one(fuse_ino_t ino, uint64_t n) {
             fs.inodes.erase({inode.src_ino, inode.src_dev});
         }
     } else if (fs.debug)
-            cerr << "DEBUG: forget: inode " << inode.src_ino
-                 << " lookup count now " << inode.nlookup << endl;
+        cerr << "DEBUG: forget: inode " << inode.src_ino
+            << " lookup count now " << inode.nlookup << endl;
 }
 
 static void sfs_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
@@ -1231,7 +1168,7 @@ static void sfs_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
 
 
 static void sfs_forget_multi(fuse_req_t req, size_t count,
-                             fuse_forget_data *forgets) {
+        fuse_forget_data *forgets) {
     for (size_t i = 0; i < count; i++)
         forget_one(forgets[i].ino, forgets[i].nlookup);
     fuse_reply_none(req);
@@ -1319,12 +1256,12 @@ out_errno:
 
 static bool is_dot_or_dotdot(const char *name) {
     return name[0] == '.' &&
-           (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'));
+        (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'));
 }
 
 
 static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
-                    off_t offset, fuse_file_info *fi, int plus) {
+        off_t offset, fuse_file_info *fi, int plus) {
 
     F3_LOG("%s: %lu", __func__, (long unsigned int)ino);
     auto d = get_dir_handle(fi);
@@ -1334,12 +1271,6 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
     auto rem = size;
     int err = 0, count = 0;
 
-    /*
-    if (fs.debug)
-        cerr << "DEBUG: readdir(): started with offset "
-             << offset << endl;
-    */
-
     auto buf = new (nothrow) char[size];
     if (!buf) {
         F3_REPLY_ERR(req, ENOMEM);
@@ -1348,8 +1279,6 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
     p = buf;
 
     if (offset != d->offset) {
-        //if (fs.debug)
-        //    cerr << "DEBUG: readdir(): seeking to " << offset << endl;
         seekdir(d->dp, offset);
         d->offset = offset;
     }
@@ -1400,12 +1329,6 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
         p += entsize;
         rem -= entsize;
         count++;
-        /*
-        if (fs.debug) {
-            cerr << "DEBUG: readdir(): added to buffer: " << entry->d_name
-                 << ", ino " << e.attr.st_ino << ", offset " << entry->d_off << endl;
-        }
-        */
     }
     err = 0;
 error:
@@ -1421,7 +1344,7 @@ error:
     } else {
         if (fs.debug)
             cerr << "DEBUG: readdir(): returning " << count
-                 << " entries, curr offset " << d->offset << endl;
+                << " entries, curr offset " << d->offset << endl;
         fuse_reply_buf(req, buf, size - rem);
     }
     delete[] buf;
@@ -1430,14 +1353,14 @@ error:
 
 
 static void sfs_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
-                        off_t offset, fuse_file_info *fi) {
+        off_t offset, fuse_file_info *fi) {
     // operation logging is done in readdir to reduce code duplication
     do_readdir(req, ino, size, offset, fi, 0);
 }
 
 
 static void sfs_readdirplus(fuse_req_t req, fuse_ino_t ino, size_t size,
-                            off_t offset, fuse_file_info *fi) {
+        off_t offset, fuse_file_info *fi) {
     // operation logging is done in readdir to reduce code duplication
     do_readdir(req, ino, size, offset, fi, 1);
 }
@@ -1452,13 +1375,13 @@ static void sfs_releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 
 
 static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
-                       mode_t mode, fuse_file_info *fi) {
+        mode_t mode, fuse_file_info *fi) {
     Inode& inode_p = get_inode(parent);
 
     F3_LOG("%s: %lu %s", __func__, (long unsigned int)parent, name);
 
     auto fd = openat(inode_p.fd, name,
-                     (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
+            (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
     if (fd == -1) {
         auto err = errno;
         if (err == ENFILE || err == EMFILE)
@@ -1468,19 +1391,9 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
     fi->fh = fd;
-    /*
-    fi->fh = fd;
-    fuse_entry_param e;
-    auto err = do_lookup(parent, name, &e);
-    if (err) {
-        if (err == ENFILE || err == EMFILE)
-            cerr << "ERROR: Reached maximum number of file descriptors." << endl;
-        F3_REPLY_ERR(req, err);
-    return;
-    }*/
 
     auto id_fd = openat(inode_p.id_fd, name,
-                     (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
+            (fi->flags | O_CREAT) & ~O_NOFOLLOW, mode);
     if (id_fd == -1) {
         auto err = errno;
         if (err == ENFILE || err == EMFILE)
@@ -1495,10 +1408,6 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
         f3_mark_as_id(id_fd, fs.idroot.length());
         fi->fh = id_fd;
         close(fd);
-
-        if (fs.file_logger_fd > 0 || fs.file_logger_socket > 0) {
-	    log_file(req, id_fd, fi->flags);
-        }
 
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
@@ -1523,7 +1432,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
     lock_guard<mutex> g {inode.m};
     inode.nopen++;
 
-    F3_LOG("Open for writing??? %p\n", std::this_thread::get_id());
+    F3_LOG("Open for writing???\n");
     inode.open_for_writing = 1;
     inode.writer_thread = std::this_thread::get_id();
 
@@ -1540,7 +1449,7 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 
 
 static void sfs_fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
-                         fuse_file_info *fi) {
+        fuse_file_info *fi) {
     (void) ino;
     int res;
     int fd = dirfd(get_dir_handle(fi)->dp);
@@ -1556,12 +1465,8 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 
     //F3_LOG("%s: %lu %d", __func__, (long unsigned int)ino, inode.fd);
 
-    if (fs.file_logger_fd > 0 && inode.is_id) {
-	    log_file(req, inode.id_fd, fi->flags);
-    }
-
     if (inode.is_id && (fi->flags & O_RDWR || fi->flags & O_WRONLY)) {
-        F3_LOG("Open for writing! %p\n", std::this_thread::get_id());
+        F3_LOG("Open for writing!\n");
         inode.open_for_writing = 1;
         inode.writer_thread = std::this_thread::get_id();
 
@@ -1571,9 +1476,9 @@ static void sfs_open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         f3_get_full_path(inode.id_fd, rel_path);
         outfile.open("/tmp/writelist", std::ios_base::app); // append instead of overwrite
         outfile << rel_path << endl;
-	writefiles.push_back(rel_path);
+        writefiles.push_back(rel_path);
     } else {
-	inode.open_for_writing = 0;
+        inode.open_for_writing = 0;
     }
 
     /* With writeback cache, kernel may send read requests even
@@ -1619,20 +1524,7 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
     lock_guard<mutex> g {inode.m};
     F3_LOG("%s: when does this get called?", __func__);
 
-    // XXX This won't work, since server isn't opening the Ceph fd
-    // but rather the ID fd.  And want to support FSs that don't support
-    // xattrs (e.g. tempfs)...
-    // Maybe open another UDS connection to the server to tell it
-    // when we're done writing?
-    // Or just share an empty dir and check for the filename to be created
-    // there
-    /*
-    if (f3_mark_write_done(inode.fd) < 0) {
-        perror("mark done");
-        F3_LOG("!!!");
-    }*/
-
-    F3_LOG("%p %d\n", fi, ino);
+    F3_LOG("%p %lu\n", fi, ino);
     if (inode.open_for_writing && inode.writer_thread == std::this_thread::get_id()) {
         inode.open_for_writing = 0;
         F3_LOG("%s: writer is closing file\n", __func__);
@@ -1645,14 +1537,14 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         outfile << rel_path << endl;
     }
 
-    
+
     auto fl = fcntl(fi->fh, F_GETFL);
     F3_LOG("%s: %d %x", __func__, fl, fl);
     if ((fl & O_RDWR) || (fl & O_WRONLY)) {
         F3_LOG("%s: setting size xattr to %ld\n", __func__, inode.size);
         f3_update_size_xattr(inode.fd, inode.size);
     }
-    
+
     // Only do this if we're the writing client
     // Probably better to actually check if fd was open for writing
     if (!inode.needs_download) {
@@ -1663,7 +1555,7 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         outfile.open("/tmp/donelist", std::ios_base::app); // append instead of overwrite
         outfile << rel_path << endl;
 
-        F3_LOG("%s %d\n", fs.idroot.c_str(), fs.idroot.length());
+        F3_LOG("%s %lu\n", fs.idroot.c_str(), fs.idroot.length());
         F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length());
         if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
             perror("send_fname_done");
@@ -1684,7 +1576,7 @@ static void sfs_flush(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 
 
 static void sfs_fsync(fuse_req_t req, fuse_ino_t ino, int datasync,
-                      fuse_file_info *fi) {
+        fuse_file_info *fi) {
     (void) ino;
     int res;
     if (datasync)
@@ -1699,7 +1591,7 @@ static void do_read(fuse_req_t req, size_t size, off_t off, fuse_file_info *fi) 
 
     fuse_bufvec buf = FUSE_BUFVEC_INIT(size);
     buf.buf[0].flags = static_cast<fuse_buf_flags>(
-        FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
+            FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
     buf.buf[0].fd = fi->fh;
     buf.buf[0].pos = off;
 
@@ -1709,71 +1601,71 @@ static void do_read(fuse_req_t req, size_t size, off_t off, fuse_file_info *fi) 
 }
 
 static void sfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-                     fuse_file_info *fi) {
+        fuse_file_info *fi) {
     (void) ino;
     Inode& inode = get_inode(ino);
 
-    F3_LOG("%s: %ld offset: %d size: %d %d %d %d\n", __func__, (long unsigned)ino, off, size, fi->fh, inode.id_fd, inode.is_id);
+    F3_LOG("%s: %ld offset: %ld size: %lu %lu %d %d\n", __func__, (long unsigned)ino, off, size, fi->fh, inode.id_fd, inode.is_id);
 
     struct stat stat;
     auto res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (res == -1) {
-	F3_LOG("%s: !!!", __func__);
+        F3_LOG("%s: !!!", __func__);
     }
     int timeout = 0;
     off_t prev_size = 0;
     int delay_us = 5;
 
-        char rel_path[PATH_MAX];
-        bzero(rel_path, PATH_MAX);
-        f3_get_full_path(inode.id_fd, rel_path);
+    char rel_path[PATH_MAX];
+    bzero(rel_path, PATH_MAX);
+    f3_get_full_path(inode.id_fd, rel_path);
 
     // Wait until...
     // X 1. Reach timeout
     // 2. We've downloaded enough to satisfy this read request
     // 3. The file is done being downloaded
     int printwait = 0;
-    while (stat.st_size <= (off+size) && (still_open(inode.client_fd) || (local_write(rel_path) && !done_writing(rel_path)))) {
-	if (printwait == 0) {
-		printwait = 1;
-		F3_LOG("begin wait\n");
-	}
-	F3_LOG("%s: still open? %d %d %d %d %d\n", __func__, stat.st_size, off+size, inode.nopen, inode.is_id, fi->fh);
-	usleep(delay_us);
-	res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
-	if (res < 0) {
-	    perror("stat");
-	}
-	if (stat.st_size == prev_size) {
-	    timeout += delay_us;
-	    delay_us *= 2;
-	} else {
-	    delay_us = 5;
-	    timeout = 0;
-	}
-	prev_size = stat.st_size;
+    while (stat.st_size <= (unsigned)(off+size) && (still_open(inode.client_fd) || (local_write(rel_path) && !done_writing(rel_path)))) {
+        if (printwait == 0) {
+            printwait = 1;
+            F3_LOG("begin wait\n");
+        }
+        F3_LOG("%s: still open? %ld %lu %lu %d %lu\n", __func__, stat.st_size, off+size, inode.nopen, inode.is_id, fi->fh);
+        usleep(delay_us);
+        res = fstatat(inode.id_fd, "", &stat, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+        if (res < 0) {
+            perror("stat");
+        }
+        if (stat.st_size == prev_size) {
+            timeout += delay_us;
+            delay_us *= 2;
+        } else {
+            delay_us = 5;
+            timeout = 0;
+        }
+        prev_size = stat.st_size;
     }
     if (timeout >= 10*1e6) {
-	F3_LOG("%s: !!! timeout (would have been) reached\n", __func__);
+        F3_LOG("%s: !!! timeout (would have been) reached\n", __func__);
     }
     if (printwait > 0) {
-	    F3_LOG("end wait\n");
+        F3_LOG("end wait\n");
     }
 
-    F3_LOG("%s: size: %d\n", __func__, size);
+    F3_LOG("%s: size: %lu\n", __func__, size);
     do_read(req, size, off, fi);
 }
 
 static void do_write_buf(fuse_req_t req, size_t size, off_t off,
-                         fuse_bufvec *in_buf, fuse_file_info *fi,
-                         Inode& inode) {
+        fuse_bufvec *in_buf, fuse_file_info *fi,
+        Inode& inode) {
     fuse_bufvec out_buf = FUSE_BUFVEC_INIT(size);
     out_buf.buf[0].flags = static_cast<fuse_buf_flags>(
-        FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
+            FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK);
     out_buf.buf[0].fd = fi->fh;
     out_buf.buf[0].pos = off;
 
-    F3_LOG("%s: %lu %d %d %d %d %p\n", __func__, fi->fh, inode.id_fd, size, off, size+off, std::this_thread::get_id());
+    F3_LOG("%s: %lu %d %lu %ld %lu\n", __func__, fi->fh, inode.id_fd, size, off, size+off);
 
     auto res = fuse_buf_copy(&out_buf, in_buf, FUSE_BUF_COPY_FLAGS);
     if (res < 0)
@@ -1798,7 +1690,7 @@ static void do_write_buf(fuse_req_t req, size_t size, off_t off,
 
 
 static void sfs_write_buf(fuse_req_t req, fuse_ino_t ino, fuse_bufvec *in_buf,
-                          off_t off, fuse_file_info *fi) {
+        off_t off, fuse_file_info *fi) {
     (void) ino;
     Inode& inode = get_inode(ino);
     //F3_LOG("%s: ID fd: %d FS fd: %d is_id: %d", __func__, inode.id_fd, inode.fd, inode.is_id);
@@ -1820,7 +1712,7 @@ static void sfs_statfs(fuse_req_t req, fuse_ino_t ino) {
 
 #ifdef HAVE_POSIX_FALLOCATE
 static void sfs_fallocate(fuse_req_t req, fuse_ino_t ino, int mode,
-                          off_t offset, off_t length, fuse_file_info *fi) {
+        off_t offset, off_t length, fuse_file_info *fi) {
     (void) ino;
     if (mode) {
         F3_REPLY_ERR(req, EOPNOTSUPP);
@@ -1833,7 +1725,7 @@ static void sfs_fallocate(fuse_req_t req, fuse_ino_t ino, int mode,
 #endif
 
 static void sfs_flock(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi,
-                      int op) {
+        int op) {
     (void) ino;
     auto res = flock(fi->fh, op);
     F3_REPLY_ERR(req, res == -1 ? errno : 0);
@@ -1842,7 +1734,7 @@ static void sfs_flock(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi,
 
 #ifdef HAVE_SETXATTR
 static void sfs_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
-                         size_t size) {
+        size_t size) {
     char *value = nullptr;
     Inode& inode = get_inode(ino);
     ssize_t ret;
@@ -1887,8 +1779,6 @@ out:
     // looks up the "security.capability" attr
     if (saverr == ENODATA) {
         fuse_reply_err(req, saverr);
-        //fuse_reply_err(req, ENOSYS);
-        //fuse_reply_xattr(req, 0);
     } else {
         F3_REPLY_ERR(req, saverr);
     }
@@ -1940,7 +1830,7 @@ out:
 
 
 static void sfs_setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
-                         const char *value, size_t size, int flags) {
+        const char *value, size_t size, int flags) {
     Inode& inode = get_inode(ino);
     ssize_t ret;
 
@@ -2032,7 +1922,7 @@ static void assign_operations(fuse_lowlevel_ops &sfs_oper) {
 
 static void print_usage(char *prog_name) {
     cout << "Usage: " << prog_name << " --help\n"
-         << "       " << prog_name << " [options] <source> <mountpoint>\n";
+        << "       " << prog_name << " [options] <source> <mountpoint>\n";
 }
 
 static cxxopts::ParseResult parse_wrapper(cxxopts::Options& parser, int& argc, char**& argv) {
@@ -2073,7 +1963,7 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         // default help string.
         auto help = opt_parser.help();
         std::cout << std::endl << "options:"
-                  << help.substr(help.find("\n\n") + 1, string::npos);
+            << help.substr(help.find("\n\n") + 1, string::npos);
         exit(0);
 
     } else if (argc != 3) {
@@ -2116,37 +2006,37 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         std::string file_logger_path = "/var/log/f3/"+fs.pod_uuid+".files";
         if (options.count("file-logger-path")) {
             file_logger_path = options["file-logger-path"].as<std::string>();
-	}
-	fs.file_logger_fd = open(file_logger_path.c_str(), O_WRONLY | O_APPEND | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+        }
+        fs.file_logger_fd = open(file_logger_path.c_str(), O_WRONLY | O_APPEND | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
         if (fs.file_logger_fd <= 0) {
             perror("file-logger-path");
         }
-	F3_LOG("logger fd: %d\n", fs.file_logger_fd);
+        F3_LOG("logger fd: %d\n", fs.file_logger_fd);
 
         if (options.count("file-logger-addr")) {
-		std::string file_logger_addr = options["file-logger-addr"].as<std::string>();
-		struct sockaddr_in server;
-		struct hostent *hostinfo;
+            std::string file_logger_addr = options["file-logger-addr"].as<std::string>();
+            struct sockaddr_in server;
+            struct hostent *hostinfo;
 
-		fs.file_logger_socket = socket(AF_INET, SOCK_STREAM, 0);
-		if (fs.file_logger_socket < 0) {
-			perror("socket");
-		}
+            fs.file_logger_socket = socket(AF_INET, SOCK_STREAM, 0);
+            if (fs.file_logger_socket < 0) {
+                perror("socket");
+            }
 
-		hostinfo = gethostbyname(file_logger_addr.c_str());
-		if (hostinfo == NULL) {
-			fprintf(stderr, "Unknown host %s\n", file_logger_addr.c_str());
-		}
+            hostinfo = gethostbyname(file_logger_addr.c_str());
+            if (hostinfo == NULL) {
+                fprintf(stderr, "Unknown host %s\n", file_logger_addr.c_str());
+            }
 
-		server.sin_family = AF_INET;
-		server.sin_port = htons(8787);
-		server.sin_addr = *(struct in_addr *)hostinfo->h_addr;
+            server.sin_family = AF_INET;
+            server.sin_port = htons(8787);
+            server.sin_addr = *(struct in_addr *)hostinfo->h_addr;
 
-		auto res = connect(fs.file_logger_socket, (struct sockaddr *)&server, sizeof(server));
-		if (res > 0) {
-			perror("connect");
-		}
-	}
+            auto res = connect(fs.file_logger_socket, (struct sockaddr *)&server, sizeof(server));
+            if (res > 0) {
+                perror("connect");
+            }
+        }
     }
 
     fs.debug = options.count("debug") != 0;
@@ -2210,9 +2100,9 @@ int main(int argc, char *argv[]) {
     // Initialize fuse
     fuse_args args = FUSE_ARGS_INIT(0, nullptr);
     if (fuse_opt_add_arg(&args, argv[0]) ||
-        fuse_opt_add_arg(&args, "-o") ||
-        fuse_opt_add_arg(&args, "default_permissions,fsname=hpps,allow_other") ||
-        (options.count("debug-fuse") && fuse_opt_add_arg(&args, "-odebug")))
+            fuse_opt_add_arg(&args, "-o") ||
+            fuse_opt_add_arg(&args, "default_permissions,fsname=hpps,allow_other") ||
+            (options.count("debug-fuse") && fuse_opt_add_arg(&args, "-odebug")))
         errx(3, "ERROR: Out of memory");
 
     fuse_lowlevel_ops sfs_oper {};

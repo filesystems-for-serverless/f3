@@ -29,21 +29,21 @@ struct move_info {
 };
 
 int setup_conn(const char *uds_path) {
-	struct sockaddr_un addr;
-	int fd;
+    struct sockaddr_un addr;
+    int fd;
 
-	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		return -errno;
-	}
+    if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+        return -errno;
+    }
 
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
 
-	strncpy(addr.sun_path, uds_path, sizeof(addr.sun_path)-1);
+    strncpy(addr.sun_path, uds_path, sizeof(addr.sun_path)-1);
 
-	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-		return -errno;
-	}
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+        return -errno;
+    }
 
     printf("Connected to %s\n", uds_path);
 
@@ -83,31 +83,29 @@ int send_fname_done(int fd, char *fname) {
 long int download_file(int fd, char *path, char *servers, size_t end_byte) {
     int ret;
 
-	char *buf = (char *)malloc(500);
-	bzero(buf, 500);
-	printf("downloading file!!!  servers: %s path: %s\n", servers, path);
+    char *buf = (char *)malloc(500);
+    bzero(buf, 500);
+    printf("downloading file!!!  servers: %s path: %s\n", servers, path);
     fflush(stdout);
-	int len = snprintf(buf, 500, "download,%s,%lu,%s\n", path, end_byte, servers);
-	printf("here??????????\n");
-    fflush(stdout);
-	if (len < 0) {
+    int len = snprintf(buf, 500, "download,%s,%lu,%s\n", path, end_byte, servers);
+    if (len < 0) {
         perror("AAA snprintf");
         fflush(stderr);
         free(buf);
-		return -errno;
-	}
+        return -errno;
+    }
 
     printf("writing %d %s\n", len, buf);
     fflush(stdout);
-	ret = write(fd, buf, len);
-	if (ret < 0) {
+    ret = write(fd, buf, len);
+    if (ret < 0) {
         perror("AAA write");
         free(buf);
-		return -errno;
-	} else if (ret < len) {
-		fprintf(stderr, "partial write %d %d\n", ret, len);
-	}
-	printf("Wrote >>>\n%s\n<<< (%d bytes)\n", buf, ret);
+        return -errno;
+    } else if (ret < len) {
+        fprintf(stderr, "partial write %d %d\n", ret, len);
+    }
+    printf("Wrote >>>\n%s\n<<< (%d bytes)\n", buf, ret);
 
     bzero(buf, 500);
     ret = read(fd, buf, 500);
@@ -129,12 +127,12 @@ long int download_file(int fd, char *path, char *servers, size_t end_byte) {
     long int new_pos = strtol(buf+2, NULL, 10);
     //printf("ID client read up to %ld\n", new_pos);
 
-	// TODO: check for ACK response
-	//printf("read %s (%d bytes)\n", buf, ret);
-    
+    // TODO: check for ACK response
+    //printf("read %s (%d bytes)\n", buf, ret);
+
     free(buf);
 
-	return new_pos;
+    return new_pos;
 }
 
 void *download_file_thread(void *ptr) {
@@ -153,27 +151,27 @@ void *download_file_thread(void *ptr) {
 long int inform_moved_file(int fd, char *old_path, char *new_path, char *servers) {
     int ret;
 
-	char *buf = (char *)malloc(500);
-	bzero(buf, 500);
-	int len = snprintf(buf, 500, "move,%s,%s,%s\n", old_path, new_path, servers);
-	if (len < 0) {
+    char *buf = (char *)malloc(500);
+    bzero(buf, 500);
+    int len = snprintf(buf, 500, "move,%s,%s,%s\n", old_path, new_path, servers);
+    if (len < 0) {
         perror("AAA snprintf");
         fflush(stderr);
         free(buf);
-		return -errno;
-	}
-    
+        return -errno;
+    }
+
     printf("writing %d %s\n", len, buf);
     fflush(stdout);
-	ret = write(fd, buf, len);
-	if (ret < 0) {
+    ret = write(fd, buf, len);
+    if (ret < 0) {
         perror("AAA write");
         free(buf);
-		return -errno;
-	} else if (ret < len) {
-		fprintf(stderr, "partial write %d %d\n", ret, len);
-	}
-	printf("Wrote >>>\n%s\n<<< (%d bytes)\n", buf, ret);
+        return -errno;
+    } else if (ret < len) {
+        fprintf(stderr, "partial write %d %d\n", ret, len);
+    }
+    printf("Wrote >>>\n%s\n<<< (%d bytes)\n", buf, ret);
 
     bzero(buf, 500);
     ret = read(fd, buf, 500);
@@ -195,12 +193,12 @@ long int inform_moved_file(int fd, char *old_path, char *new_path, char *servers
     long int new_pos = strtol(buf+2, NULL, 10);
     //printf("ID client read up to %ld\n", new_pos);
 
-	// TODO: check for ACK response
-	//printf("read %s (%d bytes)\n", buf, ret);
-    
+    // TODO: check for ACK response
+    //printf("read %s (%d bytes)\n", buf, ret);
+
     free(buf);
 
-	return new_pos;
+    return new_pos;
 }
 
 void *move_file_thread(void *ptr) {
@@ -224,15 +222,13 @@ void *move_file_thread(void *ptr) {
 
 #ifdef CLIENT_ONLY
 int main(int argc, char **argv) {
-	//if (argc < 3) {
-	if (argc < 4) {
-		printf("usage: %s path servers", argv[0]);
-		return 1;
-	}
+    //if (argc < 3) {
+    if (argc < 4) {
+        printf("usage: %s path servers", argv[0]);
+        return 1;
+    }
 
-	//download_file(argv[1], argv[2]);
     int fd = setup_conn(argv[1]);
-    //download_file(fd, argv[2], argv[3], 1000);
     download_file(fd, argv[2], argv[4], 1000);
 
     pthread_t thread;
@@ -255,7 +251,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\nDone\n");
-	
-	return 0;
+
+    return 0;
 }
 #endif
