@@ -130,7 +130,7 @@ func getF3PvcName(namespace string) (string, error) {
     return getPVCName("f3.role=f3", namespace)
 }
 
-func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (corev1.Pod, error) {
+func createTargetPod(namespace, targetPVC, localPVC, f3PV, nodeID string) (corev1.Pod, error) {
     clientset, err := getClientset()
     if err != nil {
         return corev1.Pod{}, err
@@ -157,8 +157,12 @@ func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (corev1.Pod, err
                     Command: []string{"/pause"},
                     VolumeMounts: []corev1.VolumeMount{
                         {
-                            MountPath: "/target-pv/",
+                           MountPath: "/target-pv/",
                            Name: "target-pvc",
+                        },
+                        {
+                           MountPath: "/local-pv/",
+                           Name: "local-pvc",
                         },
                     },
                 },
@@ -172,7 +176,14 @@ func createTargetPod(namespace, targetPVC, f3PV, nodeID string) (corev1.Pod, err
         ClaimName: targetPVC,
     }
 
+    localVol := corev1.Volume{}
+    localVol.Name = "local-pvc"
+    localVol.PersistentVolumeClaim = &corev1.PersistentVolumeClaimVolumeSource {
+        ClaimName: localPVC,
+    }
+
     pod.Spec.Volumes = append(pod.Spec.Volumes, targetVol)
+    pod.Spec.Volumes = append(pod.Spec.Volumes, localVol)
 
     klog.Infof("Creating pod", pod)
     pod2, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
@@ -274,15 +285,17 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
         return nil, status.Error(codes.Internal, err.Error())
     }
 
-    // Get mount point of Ceph PV
+    // Create target pod that has local and shared vol attached, to force those to be mounted on the node
     targetPVCName := pvc.Labels["f3.target-pvc"]
+    localPVCName := pvc.Labels["f3.local-pvc"]
 
-    targetPod, err := createTargetPod(namespace, targetPVCName, volumeID, ns.Driver.nodeID)
+    targetPod, err := createTargetPod(namespace, targetPVCName, localPVCName, volumeID, ns.Driver.nodeID)
     if err != nil {
         return nil, status.Error(codes.Internal, err.Error())
     }
     klog.Infof("targetpod", targetPod)
 
+    // Get mount point of Ceph PV
     cephPVC, err := getPVC(namespace, targetPVCName)
     if err != nil {
         klog.Infof("cephPVC err", err)
@@ -325,7 +338,6 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     }
 
     // Repeat to get the mount point of the local PV
-    localPVCName := pvc.Labels["f3.local-pvc"]
 
     localPVC, err := getPVC(namespace, targetPVCName)
     if err != nil {
