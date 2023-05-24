@@ -8,7 +8,6 @@ import (
     "encoding/binary"
     "io"
     log "github.com/sirupsen/logrus"
-    "math"
     "math/rand"
     "net"
     "os"
@@ -218,7 +217,7 @@ func fuseConnectionHandler(fuseConn net.Conn, tempDir string, set map[string]boo
 
     fmt.Printf("got msg %s\n", message)
     arr := strings.Split(message, ",")
-    if len(arr) < 3 {
+    if len(arr) < 4 {
         fmt.Println("!!! ignoring malformed message")
         log.WithFields(log.Fields{"thread": "client.main",}).Warning("Ignoring malformed message: " + message)
         fuseConn.Write([]byte("N\n"))
@@ -233,8 +232,9 @@ func fuseConnectionHandler(fuseConn net.Conn, tempDir string, set map[string]boo
     }
 
     fname := strings.TrimSpace(arr[1])
-    servers := getUniqueServers(arr[3:])
-    path := path.Join(tempDir, fname)
+    volid := strings.TrimSpace(arr[3])
+    servers := getUniqueServers(arr[4:])
+    fullPath := path.Join(tempDir, volid, fname)
 
     serverPool := make(map[string]bool)
     server := getServer(servers, serverPool)
@@ -243,20 +243,22 @@ func fuseConnectionHandler(fuseConn net.Conn, tempDir string, set map[string]boo
     serverPool[server] = true
 
     filesLock.Lock()
-    if _, exists := files[path]; !exists {
-        if err := openConnection(tempDir, server, fname); err != nil {
+    if _, exists := files[fullPath]; !exists {
+        // the filename sent to the server should include the volid
+        newFname := path.Join(volid, fname)
+        if err := openConnection(tempDir, server, newFname); err != nil {
             fmt.Println(err.Error())
             filesLock.Unlock()
             fmt.Fprintf(fuseConn, "N\n")
             return
         }
     } else {
-        fmt.Println("File either already exists or is already being downloaded: " + path + "\n")
+        fmt.Println("File either already exists or is already being downloaded: " + fullPath + "\n")
         filesLock.Unlock()
         return
     }
 
-    f := files[path]
+    f := files[fullPath]
     filesLock.Unlock()
 
     fmt.Println(files)
@@ -267,7 +269,7 @@ func fuseConnectionHandler(fuseConn net.Conn, tempDir string, set map[string]boo
         if w, err := io.CopyBuffer(f.fd, f.conn, buf); err != nil {
             fmt.Println(err.Error())
         } else {
-            fmt.Printf("read,%v,%v,%v\n", w, start.Unix(), path)
+            fmt.Printf("read,%v,%v,%v\n", w, start.Unix(), fullPath)
             fmt.Fprintf(fuseConn, "A,%d\n", 0)
         }
         elapsed := time.Since(start).Seconds()
@@ -318,9 +320,6 @@ func getServerIP(server string) string {
 
 //It extracts one server from the input list of servers coming from FUSE driver either randomly or fastest one
 func getServer(serverList []string, serverPool map[string]bool) string {
-    minDwldSpd := math.MaxFloat64
-    var server string
-    var israndom = false
     if randomServer {
         return serverList[rand.Intn(len(serverList))]
     } else {

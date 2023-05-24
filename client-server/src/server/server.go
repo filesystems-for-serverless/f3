@@ -76,6 +76,7 @@ func run_local_server(socket_file string) {
     }
 }
 
+// fname here should include volid
 func sendToFileLogger(fname string) {
     fmt.Printf("Sending file done to logger %v\n", fname)
     v := url.Values{}
@@ -198,6 +199,7 @@ func handleConnection(conn net.Conn) {
 
     message = strings.Split(message, ",")[1]
 
+    // message here should include volid
     fname := path.Join(temp_dir, message)
     log.WithFields(log.Fields{"thread": "server.handleConnection","filename": fname,"clientAddress":clientAddress,}).Info("Got download request for file: " + fname)
     file, err := os.Open(fname)

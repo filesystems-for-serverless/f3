@@ -16,6 +16,7 @@
 struct download_info {
     int fd;
     char *path;
+    char *volid;
     char *servers;
     size_t end_byte;
     int *download_done;
@@ -80,14 +81,14 @@ int send_fname_done(int fd, char *fname) {
     return 0;
 }
 
-long int download_file(int fd, char *path, char *servers, size_t end_byte) {
+long int download_file(int fd, char *path, char *volid, char *servers, size_t end_byte) {
     int ret;
 
     char *buf = (char *)malloc(500);
     bzero(buf, 500);
     printf("downloading file!!!  servers: %s path: %s\n", servers, path);
     fflush(stdout);
-    int len = snprintf(buf, 500, "download,%s,%lu,%s\n", path, end_byte, servers);
+    int len = snprintf(buf, 500, "download,%s,%lu,%s,%s\n", path, end_byte, volid, servers);
     if (len < 0) {
         perror("AAA snprintf");
         fflush(stderr);
@@ -137,11 +138,12 @@ long int download_file(int fd, char *path, char *servers, size_t end_byte) {
 
 void *download_file_thread(void *ptr) {
     struct download_info *dl_info = (struct download_info *)ptr;
-    long int ret = download_file(dl_info->fd, dl_info->path, dl_info->servers, dl_info->end_byte);
+    long int ret = download_file(dl_info->fd, dl_info->path, dl_info->volid, dl_info->servers, dl_info->end_byte);
     printf("Downloaded %ld bytes\n", ret);
     *(dl_info->download_done) = 1;
 
     free(dl_info->path);
+    free(dl_info->volid);
     free(dl_info->servers);
     free(dl_info);
 

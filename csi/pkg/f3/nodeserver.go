@@ -32,7 +32,7 @@ import (
     "google.golang.org/grpc/codes"
     "google.golang.org/grpc/status"
     "k8s.io/klog/v2"
-    "k8s.io/kubernetes/pkg/volume"
+    //"k8s.io/kubernetes/pkg/volume"
     //"k8s.io/utils/mount"
     mount "k8s.io/mount-utils"
     corev1 "k8s.io/api/core/v1"
@@ -160,10 +160,12 @@ func createTargetPod(namespace, targetPVC, localPVC, f3PV, nodeID string) (corev
                            MountPath: "/target-pv/",
                            Name: "target-pvc",
                         },
+/*
                         {
                            MountPath: "/local-pv/",
                            Name: "local-pvc",
                         },
+*/
                     },
                 },
             },
@@ -175,15 +177,16 @@ func createTargetPod(namespace, targetPVC, localPVC, f3PV, nodeID string) (corev
     targetVol.PersistentVolumeClaim = &corev1.PersistentVolumeClaimVolumeSource {
         ClaimName: targetPVC,
     }
-
+/*
     localVol := corev1.Volume{}
     localVol.Name = "local-pvc"
     localVol.PersistentVolumeClaim = &corev1.PersistentVolumeClaimVolumeSource {
         ClaimName: localPVC,
     }
+*/
 
     pod.Spec.Volumes = append(pod.Spec.Volumes, targetVol)
-    pod.Spec.Volumes = append(pod.Spec.Volumes, localVol)
+    //pod.Spec.Volumes = append(pod.Spec.Volumes, localVol)
 
     klog.Infof("Creating pod", pod)
     pod2, err := clientset.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
@@ -287,7 +290,8 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
     // Create target pod that has local and shared vol attached, to force those to be mounted on the node
     targetPVCName := pvc.Labels["f3.target-pvc"]
-    localPVCName := pvc.Labels["f3.local-pvc"]
+    //localPVCName := pvc.Labels["f3.local-pvc"]
+    localPVCName := ""
 
     targetPod, err := createTargetPod(namespace, targetPVCName, localPVCName, volumeID, ns.Driver.nodeID)
     if err != nil {
@@ -339,6 +343,7 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
     // Repeat to get the mount point of the local PV
 
+/*
     localPVC, err := getPVC(namespace, targetPVCName)
     if err != nil {
         klog.Infof("localPVC err", err)
@@ -359,14 +364,15 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
     if err != nil && os.IsNotExist(err) {
         sourcedir = "/var/lib/kubelet/plugins/kubernetes.io/csi/pv/"+cephPVC.Spec.VolumeName+"/globalmount"
     }
+*/
 
     // XXX
     podUID := req.GetVolumeContext()["csi.storage.k8s.io/pod.uid"]
 
     extraargs := req.GetVolumeContext()["server"]
 
-    klog.Infof("Running", "/f3-fuse-driver " + extraargs + " --address " + ns.Driver.nodeID+":9999 " + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + " --file-logger-addr action-file-server-service.default" + sourcedir + " " + targetPath)
-    args := []string{"--address", ns.Driver.nodeID+":9999", "--client-socket-path", ns.Driver.clientSocketAddress, "--server-socket-path", ns.Driver.serverSocketAddress, "--pod-uuid", podUID[0:8], "--file-logger-addr", "action-file-server-service.default", sourcedir, targetPath}
+    klog.Infof("Running", "/f3-fuse-driver " + extraargs + " --address " + ns.Driver.nodeID+":9999 " + " --client-socket-path " + ns.Driver.clientSocketAddress + " --server-socket-path " + ns.Driver.serverSocketAddress + " --pod-uuid " + podUID[0:8] + " --file-logger-addr action-file-server-service.default" + "--volid" + volumeID + " " + sourcedir + " " + targetPath)
+    args := []string{"--address", ns.Driver.nodeID+":9999", "--client-socket-path", ns.Driver.clientSocketAddress, "--server-socket-path", ns.Driver.serverSocketAddress, "--pod-uuid", podUID[0:8], "--file-logger-addr", "action-file-server-service.default", "--volid", volumeID, sourcedir, targetPath}
     args = append(args, strings.Split(extraargs, " ")...)
     cmd := exec.Command("/f3-fuse-driver", args...)
 

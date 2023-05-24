@@ -94,6 +94,7 @@ using namespace std;
 struct download_info {
     int fd;
     char *path;
+    char *volid;
     char *servers;
     //char *sources;
     size_t end_byte;
@@ -207,6 +208,7 @@ struct Fs {
     bool debug;
     std::string source;
     std::string idroot;
+    std::string volid;
     size_t blocksize;
     dev_t src_dev;
     bool nosplice;
@@ -265,7 +267,7 @@ static int f3_get_full_fd(int fd, mode_t mode) {
     return open(buf, mode);
 }
 
-static int f3_mark_as_id(int fd, int root_dir_len) {
+static int f3_mark_as_id(int fd) {
     int res = 0;
     auto saveerr = ENOMEM;
 
@@ -688,6 +690,7 @@ static void start_download(Inode& inode) {
         struct download_info *dl_info = (struct download_info *)malloc(sizeof(struct download_info));
         dl_info->fd = inode.client_fd;
         dl_info->path = strdup(full_path+fs.source.length());
+        dl_info->volid = strdup(fs.volid.c_str());
         dl_info->servers = strdup(servers);
         dl_info->end_byte = 0;
         dl_info->download_done = &inode.download_done;
@@ -924,10 +927,10 @@ static void mknod_symlink(fuse_req_t req, fuse_ino_t parent,
 
         if (f3_is_new_id(parent, name)) {
             auto fd = openat(inode_p.fd, name, O_PATH | O_NOFOLLOW);
-            f3_mark_as_id(fd, fs.source.length());
+            f3_mark_as_id(fd);
             close(fd);
             fd = openat(inode_p.id_fd, name, O_PATH | O_NOFOLLOW);
-            f3_mark_as_id(fd, fs.idroot.length());
+            f3_mark_as_id(fd);
             close(fd);
         }
 
@@ -1404,15 +1407,15 @@ static void sfs_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 
     // XXX Need to close fd?
     if (f3_is_new_id(parent, name)) {
-        f3_mark_as_id(fd, fs.source.length());
-        f3_mark_as_id(id_fd, fs.idroot.length());
+        f3_mark_as_id(fd);
+        f3_mark_as_id(id_fd);
         fi->fh = id_fd;
         close(fd);
 
         char rel_path[PATH_MAX];
         bzero(rel_path, PATH_MAX);
         f3_get_full_path(id_fd, rel_path);
-        if (send_fname_created(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
+        if (send_fname_created(fs.server_fd, rel_path+(fs.idroot.length()-fs.volid.length())) < 0) {
             perror("send_fname_done create");
         }
     }
@@ -1556,8 +1559,8 @@ static void sfs_release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         outfile << rel_path << endl;
 
         F3_LOG("%s %lu\n", fs.idroot.c_str(), fs.idroot.length());
-        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+fs.idroot.length());
-        if (send_fname_done(fs.server_fd, rel_path+fs.idroot.length()) < 0) {
+        F3_LOG("%s: sending done to %d %s\n", __func__, fs.server_fd, rel_path+(fs.idroot.length()-fs.volid.length()));
+        if (send_fname_done(fs.server_fd, rel_path+(fs.idroot.length()-fs.volid.length())) < 0) {
             perror("send_fname_done");
         }
     }
@@ -1951,6 +1954,7 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
         ("server-socket-path", "Path of Unix Domain Socket for connecting to download server", cxxopts::value<std::string>())
         ("file-logger-path", "Path of file for logging what files a pod accesses", cxxopts::value<std::string>())
         ("file-logger-addr", "Address of file for logging what files a pod accesses", cxxopts::value<std::string>())
+        ("volid", "Volume ID of volume driver is running for", cxxopts::value<std::string>())
         ("pod-uuid", "UUID of pod driver is running for", cxxopts::value<std::string>());
 
     // FIXME: Find a better way to limit the try clause to just
@@ -1978,6 +1982,10 @@ static cxxopts::ParseResult parse_options(int argc, char **argv) {
 
     if (options.count("idroot")) {
         fs.idroot = options["idroot"].as<std::string>();
+    }
+
+    if (options.count("volid")) {
+        fs.volid = options["volid"].as<std::string>();
     }
 
     if (options.count("client-socket-path")) {
@@ -2093,6 +2101,11 @@ int main(int argc, char *argv[]) {
     if (fs.root.fd == -1)
         err(1, "ERROR: open(\"%s\", O_PATH)", fs.source.c_str());
 
+    fs.idroot += "/" + fs.volid;
+    if (mkdir(fs.idroot.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1 && errno != EEXIST) {
+        perror("mkdir");
+        return 1;
+    }
     fs.root.id_fd = open(fs.idroot.c_str(), O_PATH);
     if (fs.root.id_fd == -1)
         err(1, "ERROR: open(\"%s\", O_PATH)", fs.idroot.c_str());
